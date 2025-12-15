@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+<title>智慧裝配山積圖系統</title>
+
+<!-- iOS / PWA -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0f172a">
+
+<link rel="manifest" id="manifest-link">
+<link rel="apple-touch-icon" id="apple-icon">
+
+<!-- CSS -->
+<script src="https://cdn.tailwindcss.com"></script>
+
+<!-- React -->
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+<!-- Babel（正式上線仍可用，如要效能極限再 build） -->
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body { -webkit-tap-highlight-color: transparent; background:#f1f5f9; }
+</style>
+
+<script>
+/* ===== 環境偵測 ===== */
+const ENV = {
+  IS_SHORTCUT:
+    navigator.userAgent.includes("Shortcuts") ||
+    navigator.userAgent.includes("Workflow"),
+};
+
+/* ===== PWA 僅在非捷徑 ===== */
+if (!ENV.IS_SHORTCUT) {
+  const manifest = {
+    name: "智慧山積圖",
+    short_name: "山積圖",
+    start_url: ".",
+    display: "standalone",
+    theme_color: "#0f172a",
+    background_color: "#f1f5f9",
+    icons: [{
+      src: "https://cdn-icons-png.flaticon.com/512/2921/2921226.png",
+      sizes: "512x512",
+      type: "image/png"
+    }]
+  };
+
+  const blob = new Blob([JSON.stringify(manifest)], {type:"application/json"});
+  document.getElementById("manifest-link").href = URL.createObjectURL(blob);
+  document.getElementById("apple-icon").href =
+    "https://cdn-icons-png.flaticon.com/512/2921/2921226.png";
+}
+</script>
+</head>
+
+<body class="select-none">
+<div id="root"></div>
+
+<!-- ================= 你的 React App（原封不動貼這） ================= -->
+<script type="text/babel">
+/* 🔽 這裡直接貼「你剛剛那整大段 App 程式碼」
+   完全不用改內容
+   （我前面已幫你處理所有捷徑 / PWA 問題） */
+</script>
+
+</body>
+</html>
