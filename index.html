@@ -1,82 +1,151 @@
-<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
-  <title>智慧山積圖</title>
+<script>
+const e = React.createElement;
+const { useState, useEffect, useRef } = React;
 
-  <!-- PWA -->
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="theme-color" content="#0f172a" />
-  <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/2921/2921226.png" />
+/* ========= 基本設定 ========= */
+const INITIAL_CATEGORIES = [
+  { id: 'offline', label: '線下作業', color: 'bg-slate-50 border-slate-300' },
+  { id: 'main', label: '主線', color: 'bg-blue-50 border-blue-200' },
+];
 
-  <!-- Tailwind -->
-  <script src="https://cdn.tailwindcss.com"></script>
+const TASK_TYPES = {
+  process: '○',
+  inspection: '□',
+  decision: '◇',
+  separator: '✂'
+};
 
-  <!-- React (Production) -->
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+function App() {
+  /* ========= 狀態 ========= */
+  const [takt, setTakt] = useState(180);
+  const [categories, setCategories] = useState(INITIAL_CATEGORIES);
+  const [tasks, setTasks] = useState([
+    { id: 1, category: 'offline', name: '擦拭車架', time: 15, type: 'process' },
+    { id: 2, category: 'offline', name: '條碼綁定', time: 10, type: 'process' },
+    { id: 3, category: 'offline', name: '分段', time: 0, type: 'separator', manpower: 1 },
+    { id: 4, category: 'offline', name: '線組立', time: 37, type: 'process' },
+    { id: 5, category: 'main', name: '馬達組立', time: 129, type: 'process' },
+  ]);
 
-  <!-- Chart.js -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  /* ========= 計算 ========= */
+  function calcSegments(catId) {
+    const list = tasks.filter(t => t.category === catId);
+    const segs = [];
+    let current = { time: 0, tasks: [], manpower: 1 };
 
-  <style>
-    body { background:#f1f5f9; }
-  </style>
-</head>
+    list.forEach(t => {
+      if (t.type === 'separator') {
+        segs.push(current);
+        current = { time: 0, tasks: [], manpower: t.manpower || 1 };
+      } else {
+        current.tasks.push(t);
+        current.time += t.time;
+      }
+    });
+    segs.push(current);
+    return segs;
+  }
 
-<body>
-  <div id="root"></div>
+  /* ========= Chart ========= */
+  const chartRef = useRef(null);
+  const chartIns = useRef(null);
 
-  <script>
-    const e = React.createElement;
-    const { useState, useEffect, useRef } = React;
+  useEffect(() => {
+    if (!chartRef.current) return;
+    if (chartIns.current) chartIns.current.destroy();
 
-    function App() {
-      const [count, setCount] = useState(0);
-      const chartRef = useRef(null);
-      const chartIns = useRef(null);
+    const labels = [];
+    const data = [];
+    const colors = [];
 
-      useEffect(() => {
-        if (!chartRef.current) return;
-        if (chartIns.current) chartIns.current.destroy();
+    categories.forEach(c => {
+      calcSegments(c.id).forEach((s, i) => {
+        labels.push(c.label + '-' + (i + 1));
+        data.push(s.time);
+        colors.push(s.time > takt ? '#ef4444' : '#3b82f6');
+      });
+    });
 
-        chartIns.current = new Chart(chartRef.current, {
-          type: 'bar',
-          data: {
-            labels: ['A工位', 'B工位', 'C工位'],
-            datasets: [{
-              label: '工時',
-              data: [120, 180, 150],
-              backgroundColor: '#3b82f6'
-            }]
-          },
-          options: { responsive: true }
-        });
-      }, []);
+    chartIns.current = new Chart(chartRef.current, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: '工位工時',
+          data,
+          backgroundColor: colors,
+          borderRadius: 4
+        },{
+          label: '目標節拍',
+          data: Array(labels.length).fill(takt),
+          type: 'line',
+          borderColor: '#ef4444',
+          borderDash: [5,5],
+          pointRadius: 0
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: { y: { beginAtZero: true } }
+      }
+    });
+  }, [tasks, takt]);
 
-      return e(
-        'div',
-        { className: 'min-h-screen p-4' },
-        e('h1', { className: 'text-xl font-bold mb-4' }, '智慧山積圖（正式版）'),
-        e(
-          'button',
+  /* ========= UI ========= */
+  return e(
+    'div',
+    { className: 'min-h-screen p-4 space-y-4' },
+
+    e('h1', { className: 'text-xl font-bold' }, '智慧山積圖'),
+
+    e('div', { className: 'bg-white p-3 rounded shadow flex gap-2 items-center' },
+      e('span', null, '節拍'),
+      e('input', {
+        type: 'number',
+        value: takt,
+        onChange: ev => setTakt(Number(ev.target.value)),
+        className: 'border px-2 py-1 w-20'
+      })
+    ),
+
+    e('div', { className: 'bg-white p-4 rounded shadow h-[250px]' },
+      e('canvas', { ref: chartRef })
+    ),
+
+    e('div', { className: 'flex gap-4 overflow-x-auto' },
+      categories.map(cat =>
+        e('div',
           {
-            className: 'bg-blue-600 text-white px-4 py-2 rounded mb-4',
-            onClick: () => setCount(count + 1)
+            key: cat.id,
+            className: `w-[280px] border-2 rounded p-2 flex-shrink-0 ${cat.color}`
           },
-          '點擊次數：', count
-        ),
-        e(
-          'div',
-          { className: 'bg-white p-4 rounded shadow' },
-          e('canvas', { ref: chartRef, height: 200 })
+          e('div', { className: 'font-bold mb-2 text-center' }, cat.label),
+          calcSegments(cat.id).map((seg, i) =>
+            e('div',
+              {
+                key: i,
+                className: `mb-2 p-2 rounded border ${
+                  seg.time > takt ? 'bg-red-50 border-red-300' : 'bg-white'
+                }`
+              },
+              e('div', { className: 'text-xs mb-1' }, `工時 ${seg.time}s / ${seg.manpower}人`),
+              seg.tasks.map(t =>
+                e('div',
+                  { key: t.id, className: 'text-sm flex justify-between' },
+                  e('span', null, `${TASK_TYPES[t.type]} ${t.name}`),
+                  e('span', null, t.time)
+                )
+              )
+            )
+          )
         )
-      );
-    }
+      )
+    )
+  );
+}
 
-    ReactDOM.createRoot(document.getElementById('root')).render(e(App));
-  </script>
-</body>
-</html>
+/* ========= Render ========= */
+ReactDOM.createRoot(document.getElementById('root'))
+  .render(e(App));
+</script>
