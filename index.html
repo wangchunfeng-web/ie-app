@@ -2,127 +2,145 @@
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>工廠製程管理系統</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>智慧山積圖 PWA</title>
+
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0f172a">
+<link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/2921/2921226.png">
+<link rel="manifest" id="manifest-placeholder">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+
 <style>
-  body { font-family: Arial, sans-serif; margin:0; padding:0; background:#f4f4f4; }
-  header { background:#007bff; color:white; padding:10px; text-align:center; }
-  h1 { margin:0; font-size:1.2em; }
-  #controls { display:flex; flex-wrap:wrap; padding:10px; gap:10px; background:#fff; }
-  #controls select, #controls input { padding:5px; }
-  #process-container { display:flex; flex-wrap:wrap; gap:10px; padding:10px; }
-  .process-line { background:#fff; padding:10px; border-radius:8px; flex:1; min-width:250px; }
-  .process-line h2 { font-size:1em; margin-top:0; }
-  .task { padding:8px; margin:5px 0; background:#eee; border-radius:5px; cursor:grab; display:flex; justify-content:space-between; align-items:center; }
-  .task.dragging { opacity:0.5; }
-  .chart { width:100%; height:150px; margin-top:10px; }
-  button { padding:5px 10px; cursor:pointer; border:none; border-radius:5px; background:#007bff; color:white; }
+body { -webkit-tap-highlight-color: transparent; touch-action: manipulation; background: #f1f5f9; font-family: sans-serif; }
+.chart-container { position: relative; width: 100%; height: 250px; max-height: 400px; }
+.lane-scroll::-webkit-scrollbar { width: 4px; height: 4px; }
+.lane-scroll::-webkit-scrollbar-track { background: #f1f5f9; }
+.lane-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+.analysis-table { border-collapse: collapse; width: 100%; font-size: 13px; text-align: center; }
+.analysis-table th, .analysis-table td { border: 1px solid #000; padding: 4px; }
+.analysis-table th { background-color: #f3f4f6; font-weight: bold; }
+.bg-orange-light { background-color: #ffedd5; }
+.modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999; display: flex; justify-content: center; align-items: center; padding: 20px; }
+input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+input[type=number] { -moz-appearance: textfield; }
 </style>
 </head>
 <body>
-<header>
-  <h1>工廠製程管理系統</h1>
-</header>
-
-<div id="controls">
-  <button onclick="exportExcel()">📄 匯出 Excel</button>
-  <button onclick="addLine()">➕ 新增製程段</button>
-</div>
-
-<div id="process-container"></div>
-
-<!-- Chart.js -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<!-- SheetJS -->
-<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+<div id="root"></div>
 
 <script>
-let lines = [];
-function addLine(name) {
-  const lineName = name || `製程段 ${lines.length+1}`;
-  const line = { name: lineName, tasks: [] };
-  lines.push(line);
-  renderLines();
-}
-
-function addTask(lineIndex, taskName) {
-  const person = prompt("指派人員：");
-  const standardTime = parseFloat(prompt("標準工時：")) || 1;
-  const actualTime = parseFloat(prompt("實績工時：")) || standardTime;
-  lines[lineIndex].tasks.push({name: taskName, person, standardTime, actualTime});
-  renderLines();
-}
-
-function renderLines() {
-  const container = document.getElementById("process-container");
-  container.innerHTML = "";
-  lines.forEach((line, idx) => {
-    const div = document.createElement("div");
-    div.className = "process-line";
-    div.innerHTML = `<h2>${line.name} <button onclick="addTask(${idx}, '工序 ${line.tasks.length+1}')">➕ 工序</button></h2>`;
-    line.tasks.forEach((task, tIdx) => {
-      const taskDiv = document.createElement("div");
-      taskDiv.className = "task";
-      taskDiv.draggable = true;
-      taskDiv.innerHTML = `<span>${task.name} (${task.person})</span><span>${task.actualTime}/${task.standardTime}h</span>`;
-      taskDiv.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', idx+","+tIdx); taskDiv.classList.add('dragging'); });
-      taskDiv.addEventListener('dragend', e => { taskDiv.classList.remove('dragging'); });
-      taskDiv.addEventListener('dragover', e => e.preventDefault());
-      taskDiv.addEventListener('drop', e => {
-        e.preventDefault();
-        const data = e.dataTransfer.getData('text/plain').split(',');
-        const fromLine = parseInt(data[0]), fromTask = parseInt(data[1]);
-        const temp = lines[fromLine].tasks[fromTask];
-        lines[fromLine].tasks.splice(fromTask,1);
-        lines[idx].tasks.splice(tIdx,0,temp);
-        renderLines();
-      });
-      div.appendChild(taskDiv);
-    });
-    // 繪製山積圖
-    const canvas = document.createElement("canvas");
-    canvas.className = "chart";
-    div.appendChild(canvas);
-    renderChart(canvas, line.tasks);
-    container.appendChild(div);
-  });
-}
-
-function renderChart(canvas, tasks) {
-  const ctx = canvas.getContext('2d');
-  const labels = tasks.map(t=>t.name);
-  const standardData = tasks.map(t=>t.standardTime);
-  const actualData = tasks.map(t=>t.actualTime);
-  new Chart(ctx, {
-    type:'bar',
-    data:{
-      labels,
-      datasets:[
-        {label:'標準工時', data:standardData, backgroundColor:'#007bff'},
-        {label:'實績工時', data:actualData, backgroundColor:'#ff5733'}
-      ]
-    },
-    options:{ responsive:true, maintainAspectRatio:false }
-  });
-}
-
-function exportExcel() {
-  let wb = XLSX.utils.book_new();
-  lines.forEach(line => {
-    const ws_data = [['工序','人員','標準工時','實績工時']];
-    line.tasks.forEach(t => ws_data.push([t.name, t.person, t.standardTime, t.actualTime]));
-    const ws = XLSX.utils.aoa_to_sheet(ws_data);
-    XLSX.utils.book_append_sheet(wb, ws, line.name);
-  });
-  XLSX.writeFile(wb, "工廠製程.xlsx");
-}
-
-// 初始化
-addLine("前段");
-addLine("後段");
+const manifest = {
+  "name": "智慧山積圖",
+  "short_name": "山積圖",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#f1f5f9",
+  "theme_color": "#0f172a",
+  "icons": [{ "src": "https://cdn-icons-png.flaticon.com/512/2921/2921226.png", "sizes": "512x512", "type": "image/png" }]
+};
+const blob = new Blob([JSON.stringify(manifest)], {type: 'application/json'});
+document.querySelector('#manifest-placeholder').setAttribute('href', URL.createObjectURL(blob));
 </script>
 
-<!-- PWA Service Worker -->
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+// --- App 功能核心 ---
+const App = () => {
+  const [tasks, setTasks] = useState([
+    { id: 1, name: '工序 A', person: '張三', standard: 5, actual: 3, stage: '前段', lane: 1 },
+    { id: 2, name: '工序 B', person: '李四', standard: 3, actual: 2, stage: '後段', lane: 2 },
+  ]);
+
+  const chartRef = useRef(null);
+
+  useEffect(() => {
+    drawChart();
+  }, [tasks]);
+
+  const drawChart = () => {
+    const ctx = chartRef.current.getContext('2d');
+    if (window.myChart) window.myChart.destroy();
+    window.myChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: tasks.map(t => t.name),
+        datasets: [
+          { label: '標準工時', data: tasks.map(t => t.standard), backgroundColor: '#60a5fa' },
+          { label: '實績工時', data: tasks.map(t => t.actual), backgroundColor: '#f87171' }
+        ]
+      },
+      options: { responsive: true, plugins: { legend: { position: 'top' } } }
+    });
+  };
+
+  const exportExcel = () => {
+    const wb = XLSX.utils.book_new();
+    const ws_data = [['工序','人員','標準','實績','階段','線別']];
+    tasks.forEach(t => ws_data.push([t.name, t.person, t.standard, t.actual, t.stage, t.lane]));
+    const ws = XLSX.utils.aoa_to_sheet(ws_data);
+    XLSX.utils.book_append_sheet(wb, ws, '山積圖');
+    XLSX.writeFile(wb, '山積圖.xlsx');
+  };
+
+  const addTask = () => {
+    const newTask = { id: Date.now(), name: '新工序', person: '', standard: 0, actual: 0, stage: '前段', lane: 1 };
+    setTasks([...tasks, newTask]);
+  };
+
+  const updateTask = (id, key, value) => {
+    setTasks(tasks.map(t => t.id === id ? { ...t, [key]: value } : t));
+  };
+
+  const removeTask = id => setTasks(tasks.filter(t => t.id !== id));
+
+  return (
+    <div className="p-4">
+      <h1 className="text-2xl font-bold mb-4 text-center">智慧山積圖 PWA</h1>
+      <div className="chart-container mb-4">
+        <canvas ref={chartRef}></canvas>
+      </div>
+      <table className="analysis-table mb-4">
+        <thead>
+          <tr>
+            <th>工序</th><th>人員</th><th>標準</th><th>實績</th><th>階段</th><th>線別</th><th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {tasks.map(t => (
+            <tr key={t.id}>
+              <td><input value={t.name} onChange={e=>updateTask(t.id,'name',e.target.value)} /></td>
+              <td><input value={t.person} onChange={e=>updateTask(t.id,'person',e.target.value)} /></td>
+              <td><input type="number" value={t.standard} onChange={e=>updateTask(t.id,'standard',Number(e.target.value))} /></td>
+              <td><input type="number" value={t.actual} onChange={e=>updateTask(t.id,'actual',Number(e.target.value))} /></td>
+              <td><select value={t.stage} onChange={e=>updateTask(t.id,'stage',e.target.value)}>
+                <option value="前段">前段</option><option value="後段">後段</option>
+              </select></td>
+              <td><input type="number" value={t.lane} onChange={e=>updateTask(t.id,'lane',Number(e.target.value))} /></td>
+              <td><button onClick={()=>removeTask(t.id)} className="text-red-500">刪除</button></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="flex gap-2">
+        <button onClick={addTask} className="bg-blue-500 text-white px-3 py-1 rounded">新增工序</button>
+        <button onClick={exportExcel} className="bg-green-500 text-white px-3 py-1 rounded">匯出 Excel</button>
+      </div>
+    </div>
+  );
+};
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+
 <script>
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch(console.error);
