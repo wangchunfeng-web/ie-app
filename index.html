@@ -2,9 +2,16 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>智慧裝配山積圖系統 (左側工時顯示版)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>智慧裝配山積圖系統 (PWA整合版)</title>
     
+    <!-- PWA 設定 -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#0f172a">
+    <link rel="manifest" id="manifest-placeholder">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/2921/2921226.png">
+
     <!-- CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     
@@ -19,32 +26,81 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <style>
-        .chart-container { position: relative; width: 100%; height: 300px; max-height: 400px; }
+        /* 手機優化樣式 */
+        body { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+        .chart-container { position: relative; width: 100%; height: 250px; max-height: 400px; }
+        
         @media print { .no-print { display: none !important; } .print-only { display: block !important; } body { background: white; } }
-        .lane-scroll::-webkit-scrollbar { width: 6px; }
+        
+        .lane-scroll::-webkit-scrollbar { width: 4px; height: 4px; }
         .lane-scroll::-webkit-scrollbar-track { background: #f1f5f9; }
         .lane-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
-        .lane-scroll::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
         
-        .analysis-table { border-collapse: collapse; width: 100%; font-size: 14px; text-align: center; }
-        .analysis-table th, .analysis-table td { border: 1px solid #000; padding: 6px; }
+        .analysis-table { border-collapse: collapse; width: 100%; font-size: 13px; text-align: center; }
+        .analysis-table th, .analysis-table td { border: 1px solid #000; padding: 4px; }
         .analysis-table th { background-color: #f3f4f6; font-weight: bold; }
         .bg-orange-light { background-color: #ffedd5; }
-        .signature-cell { text-align: left; padding-left: 10px; font-weight: bold; background-color: #fff; }
         
-        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999; display: flex; justify-content: center; align-items: center; }
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999; display: flex; justify-content: center; align-items: center; padding: 20px; }
         
-        /* 垂直文字樣式 */
-        .vertical-text { writing-mode: vertical-rl; text-orientation: mixed; transform: rotate(180deg); }
+        /* 隱藏 number input 的箭頭 */
+        input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+        input[type=number] { -moz-appearance: textfield; }
     </style>
 </head>
-<body class="bg-slate-100 text-slate-800">
+<body class="bg-slate-100 text-slate-800 pb-20 select-none">
     <div id="root"></div>
 
+    <!-- 1. 動態生成 Manifest -->
+    <script>
+        const manifest = {
+            "name": "智慧山積圖",
+            "short_name": "山積圖",
+            "start_url": ".",
+            "display": "standalone",
+            "background_color": "#f1f5f9",
+            "theme_color": "#0f172a",
+            "icons": [{ "src": "https://cdn-icons-png.flaticon.com/512/2921/2921226.png", "sizes": "512x512", "type": "image/png" }]
+        };
+        const manifestBlob = new Blob([JSON.stringify(manifest)], {type: 'application/json'});
+        document.querySelector('#manifest-placeholder').setAttribute('href', URL.createObjectURL(manifestBlob));
+    </script>
+
+    <!-- 2. Service Worker 注入程式碼 -->
+    <script>
+        const swCode = `
+            const CACHE_NAME = 'yz-chart-blob-v2';
+            const FILES_TO_CACHE = [
+                'https://cdn.tailwindcss.com',
+                'https://unpkg.com/react@18/umd/react.development.js',
+                'https://unpkg.com/react-dom@18/umd/react-dom.development.js',
+                'https://unpkg.com/@babel/standalone/babel.min.js',
+                'https://cdn.jsdelivr.net/npm/chart.js',
+                'https://cdn-icons-png.flaticon.com/512/2921/2921226.png'
+            ];
+            self.addEventListener('install', (event) => {
+                event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(FILES_TO_CACHE)));
+            });
+            self.addEventListener('fetch', (event) => {
+                event.respondWith(caches.match(event.request).then((response) => response || fetch(event.request)));
+            });
+            self.addEventListener('activate', (event) => {
+                event.waitUntil(caches.keys().then((keyList) => Promise.all(keyList.map((key) => key !== CACHE_NAME ? caches.delete(key) : null))));
+            });
+        `;
+        const swBlob = new Blob([swCode], { type: 'application/javascript' });
+        const swUrl = URL.createObjectURL(swBlob);
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register(swUrl).catch(err => console.log('SW 註冊失敗:', err));
+            });
+        }
+    </script>
+
+    <!-- 3. React 主程式 -->
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        // --- 內建圖標 ---
         const IconBase = ({ children, size = 16, className = "" }) => (
             <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>{children}</svg>
         );
@@ -52,7 +108,6 @@
             Plus: (p) => <IconBase {...p}><path d="M5 12h14"/><path d="M12 5v14"/></IconBase>,
             Trash2: (p) => <IconBase {...p}><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></IconBase>,
             FileSpreadsheet: (p) => <IconBase {...p}><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="M8 13h2"/><path d="M8 17h2"/><path d="M14 13h2"/><path d="M14 17h2"/></IconBase>,
-            Printer: (p) => <IconBase {...p}><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></IconBase>,
             Settings: (p) => <IconBase {...p}><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.47a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.35a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></IconBase>,
             Factory: (p) => <IconBase {...p}><path d="M2 20a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8l-7 5V8l-7 5V4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/><line x1="17" y1="18" x2="17" y2="18"/><line x1="12" y1="18" x2="12" y2="18"/><line x1="7" y1="18" x2="7" y2="18"/></IconBase>,
             CheckCircle: (p) => <IconBase {...p}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></IconBase>,
@@ -61,15 +116,14 @@
             MoveUp: (p) => <IconBase {...p}><path d="M8 6L12 2L16 6"/><path d="M12 2V22"/></IconBase>,
             MoveDown: (p) => <IconBase {...p}><path d="M8 18L12 22L16 18"/><path d="M12 2V22"/></IconBase>,
             X: (p) => <IconBase {...p}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></IconBase>,
-            BarChart3: (p) => <IconBase {...p}><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></IconBase>,
-            Calculator: (p) => <IconBase {...p}><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="16" y1="14" x2="16" y2="14"/><line x1="12" y1="14" x2="12" y2="14"/><line x1="8" y1="14" x2="8" y2="14"/><line x1="16" y1="18" x2="16" y2="18"/><line x1="12" y1="18" x2="12" y2="18"/><line x1="8" y1="18" x2="8" y2="18"/></IconBase>,
             Scissors: (p) => <IconBase {...p}><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></IconBase>,
             Save: (p) => <IconBase {...p}><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></IconBase>,
             FolderOpen: (p) => <IconBase {...p}><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></IconBase>,
             FilePlus: (p) => <IconBase {...p}><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></IconBase>,
+            Menu: (p) => <IconBase {...p}><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></IconBase>,
         };
 
-        const { Plus, Trash2, FileSpreadsheet, Printer, Settings, Factory, CheckCircle, HelpCircle, Layout, MoveUp, MoveDown, X, BarChart3, Calculator, Scissors, Save, FolderOpen, FilePlus } = Icons;
+        const { Plus, Trash2, FileSpreadsheet, Settings, Factory, CheckCircle, HelpCircle, Layout, MoveUp, MoveDown, X, Scissors, Save, FolderOpen, FilePlus, Menu } = Icons;
 
         const INITIAL_CATEGORIES = [
             { id: 'offline', label: '線下作業 (Off-line)', color: 'bg-slate-50 border-slate-300' },
@@ -89,7 +143,6 @@
         };
 
         const App = () => {
-            // --- State ---
             const [taktTime, setTaktTime] = useState(() => loadState('yz_takt', 180));
             const [productName, setProductName] = useState(() => loadState('yz_product', "MY27 ANYTOUR E+"));
             const [clientName, setClientName] = useState(() => loadState('yz_client', "OB"));
@@ -113,10 +166,10 @@
             const [newTask, setNewTask] = useState({ name: "", time: "", desc: "", type: 'process', category: 'main' });
             const [showSettings, setShowSettings] = useState(false);
             const [showFileMenu, setShowFileMenu] = useState(false);
+            const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
             const chartRef = useRef(null);
             const chartInstance = useRef(null);
 
-            // Auto-Save effects
             useEffect(() => localStorage.setItem('yz_takt', JSON.stringify(taktTime)), [taktTime]);
             useEffect(() => localStorage.setItem('yz_product', JSON.stringify(productName)), [productName]);
             useEffect(() => localStorage.setItem('yz_client', JSON.stringify(clientName)), [clientName]);
@@ -129,60 +182,40 @@
             useEffect(() => localStorage.setItem('yz_categories', JSON.stringify(categories)), [categories]);
             useEffect(() => localStorage.setItem('yz_tasks', JSON.stringify(tasks)), [tasks]);
 
-            // --- Project Management ---
             const saveProject = () => {
-                const name = prompt("請輸入專案存檔名稱：", `${productName} - ${new Date().toLocaleDateString()}`);
+                const name = prompt("存檔名稱：", `${productName} - ${new Date().toLocaleDateString()}`);
                 if (!name) return;
-                const projectData = {
-                    id: Date.now(),
-                    name: name,
-                    timestamp: new Date().toLocaleString(),
-                    data: { taktTime, productName, clientName, lineName, year, allowance, workSeconds, processEngineer, timeStudyEngineer, categories, tasks }
-                };
+                const projectData = { id: Date.now(), name: name, timestamp: new Date().toLocaleString(), data: { taktTime, productName, clientName, lineName, year, allowance, workSeconds, processEngineer, timeStudyEngineer, categories, tasks } };
                 const savedProjects = JSON.parse(localStorage.getItem('yz_saved_projects') || '[]');
                 savedProjects.push(projectData);
                 localStorage.setItem('yz_saved_projects', JSON.stringify(savedProjects));
-                alert("專案已儲存！");
+                alert("已儲存");
+                setMobileMenuOpen(false);
             };
             const loadProject = (project) => {
-                if(!confirm(`確定要載入「${project.name}」嗎？目前的未儲存進度將被覆蓋。`)) return;
+                if(!confirm(`載入「${project.name}」？未儲存進度將遺失。`)) return;
                 const d = project.data;
                 setTaktTime(d.taktTime); setProductName(d.productName); setClientName(d.clientName); setLineName(d.lineName); setYear(d.year); setAllowance(d.allowance); setWorkSeconds(d.workSeconds); setProcessEngineer(d.processEngineer); setTimeStudyEngineer(d.timeStudyEngineer); setCategories(d.categories); setTasks(d.tasks);
-                setShowFileMenu(false);
+                setShowFileMenu(false); setMobileMenuOpen(false);
             };
             const deleteProject = (id) => {
-                if(!confirm("確定要刪除此存檔？")) return;
+                if(!confirm("確定刪除？")) return;
                 const savedProjects = JSON.parse(localStorage.getItem('yz_saved_projects') || '[]');
                 const newProjects = savedProjects.filter(p => p.id !== id);
                 localStorage.setItem('yz_saved_projects', JSON.stringify(newProjects));
                 setShowFileMenu(false); setTimeout(() => setShowFileMenu(true), 10);
             };
-            const createNewProject = () => {
-                if(!confirm("確定要開新專案？目前的畫面將被清空。")) return;
-                setTasks([]); setCategories(INITIAL_CATEGORIES); setProductName("New Project");
-            };
+            const createNewProject = () => { if(confirm("開新專案？")) { setTasks([]); setCategories(INITIAL_CATEGORIES); setProductName("New Project"); setMobileMenuOpen(false); } };
 
-            // --- Calculations ---
             const getSegments = () => {
-                let allSegments = [];
-                let totalManpower = 0;
+                let allSegments = []; let totalManpower = 0;
                 categories.forEach(cat => {
                     const laneTasks = tasks.filter(t => t.category === cat.id);
-                    let currentSegmentTime = 0;
-                    let hasSeparator = false;
-                    let laneManpower = 0;
-                    let tasksInSegment = 0;
+                    let currentSegmentTime = 0; let hasSeparator = false; let laneManpower = 0; let tasksInSegment = 0;
                     laneTasks.forEach((task) => {
                         if (task.type === 'separator') {
-                            hasSeparator = true;
-                            allSegments.push(currentSegmentTime);
-                            laneManpower += (task.manpower || 1);
-                            currentSegmentTime = 0;
-                            tasksInSegment = 0;
-                        } else {
-                            currentSegmentTime += (task.time || 0);
-                            tasksInSegment++;
-                        }
+                            hasSeparator = true; allSegments.push(currentSegmentTime); laneManpower += (task.manpower || 1); currentSegmentTime = 0; tasksInSegment = 0;
+                        } else { currentSegmentTime += (task.time || 0); tasksInSegment++; }
                     });
                     if (tasksInSegment > 0 || !hasSeparator) { allSegments.push(currentSegmentTime); laneManpower += 1; }
                     if (laneTasks.length === 0) laneManpower = 0;
@@ -198,7 +231,7 @@
                 const lineSpeed = maxStationTime > 0 ? maxStationTime : taktTime;
                 const dailyCapacity = lineSpeed > 0 ? (workSeconds / lineSpeed).toFixed(0) : 0;
                 const balanceRate = (lineSpeed > 0 && totalManpower > 0) ? ((totalTime / (lineSpeed * totalManpower)) * 100).toFixed(2) : 0;
-                const standardTime = (totalTime * allowance).toFixed(2);
+                const standardTime = ((lineSpeed * totalManpower * allowance) / 60).toFixed(2);
                 return { totalTime, manpower: totalManpower, lineSpeed, dailyCapacity, balanceRate, standardTime };
             })();
 
@@ -206,67 +239,40 @@
                 if (chartInstance.current) chartInstance.current.destroy();
                 if (chartRef.current) {
                     const ctx = chartRef.current.getContext('2d');
-                    const dataValues = categories.map(cat => tasks.filter(t => t.category === cat.id && t.type !== 'separator').reduce((sum, t) => sum + t.time, 0));
-                    const labels = categories.map(cat => cat.label.split(' ')[0]);
-                    const backgroundColors = dataValues.map(val => val > taktTime ? '#ef4444' : '#3b82f6');
+                    const chartLabels = []; const chartData = []; const chartColors = [];
+                    categories.forEach(cat => {
+                        const laneTasks = tasks.filter(t => t.category === cat.id);
+                        let currentMetaTime = 0; let segmentIndex = 1; let hasTasks = false;
+                        laneTasks.forEach(t => {
+                            if (t.type === 'separator') {
+                                if (hasTasks || currentMetaTime > 0) {
+                                    const manpower = t.manpower || 1;
+                                    chartLabels.push(`${cat.label.split(' ')[0]}-${segmentIndex} (${manpower}人)`);
+                                    chartData.push(currentMetaTime); chartColors.push(currentMetaTime > taktTime ? '#ef4444' : '#3b82f6'); segmentIndex++;
+                                }
+                                currentMetaTime = 0; hasTasks = false;
+                            } else { currentMetaTime += t.time; hasTasks = true; }
+                        });
+                        if (hasTasks || currentMetaTime > 0) {
+                            const manpower = 1;
+                            chartLabels.push(`${cat.label.split(' ')[0]}-${segmentIndex} (${manpower}人)`);
+                            chartData.push(currentMetaTime); chartColors.push(currentMetaTime > taktTime ? '#ef4444' : '#3b82f6');
+                        }
+                    });
                     chartInstance.current = new Chart(ctx, {
                         type: 'bar',
-                        data: {
-                            labels: labels,
-                            datasets: [{ label: '總工時', data: dataValues, backgroundColor: backgroundColors, borderRadius: 4 }, { label: '目標節拍', data: Array(labels.length).fill(taktTime), type: 'line', borderColor: '#ef4444', borderDash: [5, 5], pointStyle: false }]
-                        },
+                        data: { labels: chartLabels, datasets: [{ label: '工位工時', data: chartData, backgroundColor: chartColors, borderRadius: 4 }, { label: '目標節拍', data: Array(chartLabels.length).fill(taktTime), type: 'line', borderColor: '#ef4444', borderDash: [5, 5], pointStyle: false }] },
                         options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } }
                     });
                 }
             }, [tasks, categories, taktTime]);
 
-            // Drag Drop
-            const [draggedItem, setDraggedItem] = useState(null);
-            const handleDragStart = (e, task) => { setDraggedItem(task); e.dataTransfer.effectAllowed = "move"; setTimeout(() => e.target.classList.add('opacity-50'), 0); };
-            const handleDragEnd = (e) => { e.target.classList.remove('opacity-50'); setDraggedItem(null); };
-            const handleDragOver = (e) => e.preventDefault();
-            const handleDrop = (e, targetTask) => {
-                e.preventDefault();
-                if (!draggedItem || draggedItem.id === targetTask.id) return;
-                const newTasks = [...tasks];
-                const oldIdx = newTasks.findIndex(t => t.id === draggedItem.id);
-                if (draggedItem.category !== targetTask.category) newTasks[oldIdx].category = targetTask.category;
-                newTasks.splice(oldIdx, 1);
-                if (targetTask.id === 'DROP_ZONE') newTasks.push({...draggedItem, category: targetTask.category});
-                else { const newIdx = newTasks.findIndex(t => t.id === targetTask.id); newTasks.splice(newIdx, 0, draggedItem); }
-                setTasks(newTasks);
-            };
-
-            // Actions
-            const addSeparator = () => {
-                let cat = newTask.category;
-                if(!categories.find(c => c.id === cat)) cat = categories[0].id;
-                const others = tasks.filter(t => t.category !== cat);
-                const current = tasks.filter(t => t.category === cat);
-                setTasks([...others, ...current, { id: Date.now(), category: cat, name: "分段點", time: 0, desc: "換人/段落結束", type: 'separator', manpower: 1 }]);
-            };
-            const moveCategory = (index, direction) => {
-                const newCats = [...categories];
-                const target = index + direction;
-                if (target >= 0 && target < newCats.length) { [newCats[index], newCats[target]] = [newCats[target], newCats[index]]; setCategories(newCats); }
-            };
-            const deleteCategory = (id) => { if(confirm("確定刪除？")) { setCategories(categories.filter(c => c.id !== id)); setTasks(tasks.filter(t => t.category !== id)); }};
-            const handleAddTask = () => {
-                if(!newTask.name || !newTask.time) return;
-                let cat = newTask.category;
-                if(!categories.find(c => c.id === cat)) cat = categories[0].id;
-                setTasks([...tasks, { ...newTask, id: Date.now(), time: Number(newTask.time), category: cat }]);
-                setNewTask({ ...newTask, name: "", time: "", desc: "" });
-            };
-            const handleDeleteTask = (id) => setTasks(tasks.filter(t => t.id !== id));
-            const addCategory = () => { const name = prompt("輸入新產線名稱:"); if(name) setCategories([...categories, { id: 'cat_'+Date.now(), label: name, color: 'bg-indigo-50 border-indigo-200' }]); };
-
-            // ✅ 完全修復的 Export 邏輯 - Excel 排版對齐
+            // ✅ 更新後的 Excel 匯出功能 (iOS 相容 XLSX 格式)
             const exportToXLS = () => {
                 try {
                     const dateStr = new Date().toLocaleDateString();
 
-                    // Step 1: 為每個 category 準備分段資訊
+                    // Step 1: 資料預處理 (分段邏輯)
                     const categorySegments = {};
                     categories.forEach(cat => {
                         const segments = [];
@@ -289,178 +295,161 @@
                             currentSegment.totalTime = currentSegment.tasks.reduce((sum, t) => sum + t.time, 0);
                             segments.push({...currentSegment});
                         }
-
                         categorySegments[cat.id] = segments;
-                    });                            // Step 2: 建立 HTML 表格 (每行欄位數完全一致)
-                            const colsPerCat = 5; // 時間 | 符號 | 工時 | 名稱 | 備註
-                            const totalCols = categories.length * colsPerCat;
+                    });
 
-                            let html = [];
-                            html.push(`<!DOCTYPE html>`);
-                            html.push(`<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">`);
-                            html.push(`<head><meta charset="UTF-8"><style>body { font-family: Arial, sans-serif; } table { border-collapse: collapse; width: 100%; } td { border: 1px solid #000; padding: 4px; } th { border: 1px solid #000; padding: 4px; background-color: #f3f4f6; font-weight: bold; }</style></head>`);
-                            html.push(`<body><table>`);
+                    // Step 2: 建立 HTML 表格
+                    const colsPerCat = 5; 
+                    const totalCols = categories.length * colsPerCat;
 
-                            // 標題行
-                            html.push(`<tr><td style="background-color: #1e3a8a; color: white; text-align: center; font-size: 14pt; font-weight: bold; padding: 8px;" colspan="${totalCols}">MY27 / G9 ${productName} 裝配操作程序圖</td></tr>`);
+                    let html = [];
+                    html.push(`<?xml version="1.0"?>`);
+                    html.push(`<?mso-application progid="Excel.Sheet"?>`);
+                    html.push(`<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet" xmlns:html="http://www.w3.org/TR/REC-html40">`);
+                    html.push(`<Worksheet ss:Name="山積圖"><Table>`);
 
-                            // 元資訊行
-                            html.push(`<tr>`);
-                            for (let i = 0; i < categories.length; i++) {
-                                if (i === 0) html.push(`<td colspan="${colsPerCat}" style="background-color: #f1f5f9; font-weight: bold;">客戶: ${clientName}</td>`);
-                                else if (i === 1) html.push(`<td colspan="${colsPerCat}" style="background-color: #f1f5f9; font-weight: bold;">年度: ${year}</td>`);
-                                else if (i === 2) html.push(`<td colspan="${colsPerCat}" style="background-color: #f1f5f9; font-weight: bold;">生產線別: ${lineName}</td>`);
-                                else if (i === 3) html.push(`<td colspan="${colsPerCat}" style="background-color: #f1f5f9; font-weight: bold;">制定日期: ${dateStr}</td>`);
-                            }
-                            html.push(`</tr>`);
+                    // 標題與元資訊
+                    html.push(`<Row><Cell ss:MergeAcross="${totalCols-1}" ss:StyleID="header"><Data ss:Type="String">${productName} 裝配操作程序圖</Data></Cell></Row>`);
+                    html.push(`<Row>`);
+                    html.push(`<Cell ss:MergeAcross="${colsPerCat-1}"><Data ss:Type="String">客戶: ${clientName}</Data></Cell>`);
+                    html.push(`<Cell ss:MergeAcross="${colsPerCat-1}"><Data ss:Type="String">年度: ${year}</Data></Cell>`);
+                    html.push(`<Cell ss:MergeAcross="${colsPerCat-1}"><Data ss:Type="String">線別: ${lineName}</Data></Cell>`);
+                    if(categories.length > 3) html.push(`<Cell ss:MergeAcross="${totalCols - 3*colsPerCat - 1}"><Data ss:Type="String"></Data></Cell>`);
+                    html.push(`</Row>`);
 
-                            // 產線標題行
-                            html.push(`<tr>`);
-                            categories.forEach(cat => {
-                                html.push(`<td colspan="${colsPerCat}" style="background-color: #dbeafe; text-align: center; font-weight: bold;">${cat.label}</td>`);
-                            });
-                            html.push(`</tr>`);
+                    // 產線標題
+                    html.push(`<Row>`);
+                    categories.forEach(cat => {
+                        html.push(`<Cell ss:MergeAcross="${colsPerCat-1}" ss:StyleID="subheader"><Data ss:Type="String">${cat.label}</Data></Cell>`);
+                    });
+                    html.push(`</Row>`);
 
-                            // 計算最大行數
-                            const maxRowsPerCat = Math.max(...categories.map(cat => {
-                                let count = 0;
-                                categorySegments[cat.id].forEach(seg => {
-                                    count += seg.isSeparator ? 1 : seg.tasks.length;
-                                });
-                                return count;
-                            }), 1);
+                    // 表身資料
+                    const maxRowsPerCat = Math.max(...categories.map(cat => {
+                        let count = 0;
+                        categorySegments[cat.id].forEach(seg => { count += seg.isSeparator ? 1 : seg.tasks.length; });
+                        return count;
+                    }), 1);
 
-                            // 逐行輸出 - 確保每行欄位數完全一致
-                            for (let rowIdx = 0; rowIdx < maxRowsPerCat; rowIdx++) {
-                                html.push(`<tr>`);
-                                
-                                categories.forEach(cat => {
-                                    let rowCounter = 0;
-                                    let isFound = false;
-                                    
-                                    for (let seg of categorySegments[cat.id]) {
-                                        if (seg.isSeparator) {
-                                            if (rowCounter === rowIdx) {
-                                                html.push(`<td colspan="${colsPerCat}" style="background-color: #fef3c7; text-align: center; font-weight: bold;">▼ 分段 (${seg.manpower}人)</td>`);
-                                                isFound = true;
-                                                break;
-                                            }
-                                            rowCounter += 1;
-                                        } else {
-                                            for (let taskIdx = 0; taskIdx < seg.tasks.length; taskIdx++) {
-                                                if (rowCounter === rowIdx) {
-                                                    const task = seg.tasks[taskIdx];
-                                                    const symbol = TASK_TYPES[task.type]?.unicode || '○';
-                                                    const timeStr = taskIdx === 0 ? seg.totalTime + 's' : '';
-                                                    const timeBgStyle = seg.totalTime > taktTime ? 'background-color: #ffedd5; color: #dc2626; font-weight: bold;' : 'background-color: #f3f4f6;';
-                                                    
-                                                    html.push(`<td style="${timeBgStyle} text-align: center;">${timeStr}</td>`);
-                                                    html.push(`<td style="text-align: center;">${symbol}</td>`);
-                                                    html.push(`<td style="text-align: center;">${task.time}s</td>`);
-                                                    html.push(`<td style="text-align: left;">${task.name}</td>`);
-                                                    html.push(`<td style="text-align: center;">${task.desc || ''}</td>`);
-                                                    
-                                                    isFound = true;
-                                                    break;
-                                                }
-                                                rowCounter += 1;
-                                            }
-                                            if (isFound) break;
+                    for (let rowIdx = 0; rowIdx < maxRowsPerCat; rowIdx++) {
+                        html.push(`<Row>`);
+                        categories.forEach(cat => {
+                            let rowCounter = 0;
+                            let isFound = false;
+                            
+                            for (let seg of categorySegments[cat.id]) {
+                                if (seg.isSeparator) {
+                                    if (rowCounter === rowIdx) {
+                                        html.push(`<Cell ss:MergeAcross="${colsPerCat-1}" ss:StyleID="separator"><Data ss:Type="String">▼ 分段 (${seg.manpower}人)</Data></Cell>`);
+                                        isFound = true; break;
+                                    }
+                                    rowCounter += 1;
+                                } else {
+                                    for (let taskIdx = 0; taskIdx < seg.tasks.length; taskIdx++) {
+                                        if (rowCounter === rowIdx) {
+                                            const task = seg.tasks[taskIdx];
+                                            const timeStr = taskIdx === 0 ? seg.totalTime + 's' : '';
+                                            const styleID = seg.totalTime > taktTime ? 'warning' : 'normal';
+                                            html.push(`<Cell ss:StyleID="${styleID}"><Data ss:Type="String">${timeStr}</Data></Cell>`);
+                                            html.push(`<Cell><Data ss:Type="String">${TASK_TYPES[task.type]?.unicode || '○'}</Data></Cell>`);
+                                            html.push(`<Cell><Data ss:Type="Number">${task.time}</Data></Cell>`);
+                                            html.push(`<Cell><Data ss:Type="String">${task.name}</Data></Cell>`);
+                                            html.push(`<Cell><Data ss:Type="String"></Data></Cell>`);
+                                            isFound = true; break;
                                         }
+                                        rowCounter += 1;
                                     }
-                                    
-                                    if (!isFound) {
-                                        // 填滿空欄，保持欄位數一致
-                                        html.push(`<td></td><td></td><td></td><td></td><td></td>`);
-                                    }
-                                });
-                                
-                                html.push(`</tr>`);
+                                    if (isFound) break;
+                                }
                             }
+                            if (!isFound) {
+                                for(let i=0; i<colsPerCat; i++) html.push(`<Cell><Data ss:Type="String"></Data></Cell>`);
+                            }
+                        });
+                        html.push(`</Row>`);
+                    }
 
-                            // 空行分隔
-                            html.push(`<tr><td colspan="${totalCols}" style="height: 8px; border: none;"></td></tr>`);
+                    // 數據分析表
+                    html.push(`<Row><Cell ss:MergeAcross="${totalCols-1}"><Data ss:Type="String"></Data></Cell></Row>`);
+                    html.push(`<Row><Cell ss:MergeAcross="${totalCols-1}" ss:StyleID="subheader"><Data ss:Type="String">生產數據分析</Data></Cell></Row>`);
+                    html.push(`<Row><Cell ss:MergeAcross="1" ss:StyleID="bold"><Data ss:Type="String">總工時</Data></Cell><Cell ss:MergeAcross="2"><Data ss:Type="String">${stats.totalTime}s</Data></Cell><Cell ss:MergeAcross="1" ss:StyleID="bold"><Data ss:Type="String">定員</Data></Cell><Cell ss:MergeAcross="${totalCols-7}"><Data ss:Type="String">${stats.manpower}人</Data></Cell></Row>`);
+                    html.push(`<Row><Cell ss:MergeAcross="1" ss:StyleID="bold"><Data ss:Type="String">線速</Data></Cell><Cell ss:MergeAcross="2"><Data ss:Type="String">${stats.lineSpeed}s</Data></Cell><Cell ss:MergeAcross="1" ss:StyleID="bold"><Data ss:Type="String">平衡率</Data></Cell><Cell ss:MergeAcross="${totalCols-7}"><Data ss:Type="String">${stats.balanceRate}%</Data></Cell></Row>`);
+                    html.push(`<Row><Cell ss:MergeAcross="1" ss:StyleID="bold"><Data ss:Type="String">日產能</Data></Cell><Cell ss:MergeAcross="2"><Data ss:Type="String">${stats.dailyCapacity}</Data></Cell><Cell ss:MergeAcross="1" ss:StyleID="bold"><Data ss:Type="String">標準工時</Data></Cell><Cell ss:MergeAcross="${totalCols-7}"><Data ss:Type="String">${stats.standardTime}m</Data></Cell></Row>`);
 
-                            // 分析表標題
-                            html.push(`<tr><td colspan="${totalCols}" style="background-color: #f3f4f6; font-weight: bold; text-align: center;">生產數據分析表</td></tr>`);
+                    html.push(`</Table></Worksheet>`);
+                    
+                    // 樣式定義
+                    html.push(`<Styles>`);
+                    html.push(`<Style ss:ID="header"><Font ss:Bold="1" ss:Size="14"/><Interior ss:Color="#1e3a8a" ss:Pattern="Solid"/><Alignment ss:Horizontal="Center" ss:Vertical="Center"/></Style>`);
+                    html.push(`<Style ss:ID="subheader"><Font ss:Bold="1"/><Interior ss:Color="#dbeafe" ss:Pattern="Solid"/><Alignment ss:Horizontal="Center" ss:Vertical="Center"/></Style>`);
+                    html.push(`<Style ss:ID="separator"><Font ss:Bold="1"/><Interior ss:Color="#fef3c7" ss:Pattern="Solid"/><Alignment ss:Horizontal="Center" ss:Vertical="Center"/></Style>`);
+                    html.push(`<Style ss:ID="warning"><Font ss:Bold="1" ss:Color="#dc2626"/><Interior ss:Color="#ffedd5" ss:Pattern="Solid"/><Alignment ss:Horizontal="Center" ss:Vertical="Center"/></Style>`);
+                    html.push(`<Style ss:ID="normal"><Interior ss:Color="#f3f4f6" ss:Pattern="Solid"/><Alignment ss:Horizontal="Center" ss:Vertical="Center"/></Style>`);
+                    html.push(`<Style ss:ID="bold"><Font ss:Bold="1"/></Style>`);
+                    html.push(`</Styles>`);
+                    
+                    html.push(`</Workbook>`);
 
-                            // 分析表標頭 - 欄數對齊為 totalCols
-                            html.push(`<tr style="background-color: #f3f4f6;">`);
-                            const colsAnalysis = Math.floor(totalCols / 6);
-                            html.push(`<td colspan="${colsAnalysis}" style="font-weight: bold; text-align: center; border: 1px solid #000;">總工時</td>`);
-                            html.push(`<td colspan="${colsAnalysis}" style="font-weight: bold; text-align: center; border: 1px solid #000;">定員</td>`);
-                            html.push(`<td colspan="${colsAnalysis}" style="font-weight: bold; text-align: center; border: 1px solid #000;">線速</td>`);
-                            html.push(`<td colspan="${colsAnalysis}" style="font-weight: bold; text-align: center; border: 1px solid #000;">平衡率</td>`);
-                            html.push(`<td colspan="${colsAnalysis}" style="font-weight: bold; text-align: center; border: 1px solid #000;">日產能</td>`);
-                            html.push(`<td colspan="${totalCols - colsAnalysis * 5}" style="font-weight: bold; text-align: center; border: 1px solid #000;">標準工時</td>`);
-                            html.push(`</tr>`);
-
-                            // 分析表數據 - 欄數對齊為 totalCols
-                            html.push(`<tr>`);
-                            html.push(`<td colspan="${colsAnalysis}" style="background-color: #ffedd5; text-align: center; border: 1px solid #000;">${stats.totalTime}</td>`);
-                            html.push(`<td colspan="${colsAnalysis}" style="background-color: #ffedd5; text-align: center; border: 1px solid #000;">${stats.manpower}</td>`);
-                            html.push(`<td colspan="${colsAnalysis}" style="background-color: #ffedd5; text-align: center; border: 1px solid #000;">${stats.lineSpeed}</td>`);
-                            html.push(`<td colspan="${colsAnalysis}" style="background-color: #ffedd5; text-align: center; border: 1px solid #000;">${stats.balanceRate}%</td>`);
-                            html.push(`<td colspan="${colsAnalysis}" style="background-color: #ffedd5; text-align: center; border: 1px solid #000;">${stats.dailyCapacity}</td>`);
-                            html.push(`<td colspan="${totalCols - colsAnalysis * 5}" style="background-color: #ffedd5; text-align: center; border: 1px solid #000;">${stats.standardTime}</td>`);
-                            html.push(`</tr>`);
-
-                            // 空行分隔
-                            html.push(`<tr><td colspan="${totalCols}" style="height: 8px; border: none;"></td></tr>`);
-
-                            // 簽章行 - 欄數對齊為 totalCols
-                            html.push(`<tr>`);
-                            html.push(`<td colspan="1" style="text-align: left; font-weight: bold; border: 1px solid #000;">流程製訂：</td>`);
-                            html.push(`<td colspan="${Math.ceil((totalCols - 2) / 2)}" style="text-align: left; border: 1px solid #000;">${processEngineer}</td>`);
-                            html.push(`<td colspan="1" style="text-align: left; font-weight: bold; border: 1px solid #000;">工時製訂：</td>`);
-                            html.push(`<td colspan="${totalCols - 3 - Math.ceil((totalCols - 2) / 2)}" style="text-align: left; border: 1px solid #000;">${timeStudyEngineer}</td>`);
-                            html.push(`</tr>`);
-
-                    html.push(`</table></body></html>`);
-
-                    // Step 3: 下載
-                    const finalHTML = html.join('\n');
-                    const blob = new Blob([finalHTML], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+                    // Step 3: 下載 (使用現代 XLSX MIME type)
+                    const finalXML = html.join('\n');
+                    const blob = new Blob([finalXML], { 
+                        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+                    });
                     const link = document.createElement('a');
                     link.href = URL.createObjectURL(blob);
-                    link.download = `${productName.replace(/\//g, '-')}_Report.xls`;
+                    link.download = `${productName.replace(/[^a-z0-9]/gi, '_')}_${Date.now()}.xlsx`;
                     document.body.appendChild(link);
                     link.click();
                     document.body.removeChild(link);
                     URL.revokeObjectURL(link.href);
-                    
+                    setMobileMenuOpen(false);
                 } catch(err) {
-                    console.error('Excel export error:', err);
                     alert('匯出失敗：' + err.message);
                 }
             };
 
+            const [draggedItem, setDraggedItem] = useState(null);
+            const handleDragStart = (e, task) => { setDraggedItem(task); e.dataTransfer.effectAllowed = "move"; setTimeout(() => e.target.classList.add('opacity-50'), 0); };
+            const handleDragEnd = (e) => { e.target.classList.remove('opacity-50'); setDraggedItem(null); };
+            const handleDragOver = (e) => e.preventDefault();
+            const handleDrop = (e, targetTask) => {
+                e.preventDefault(); if (!draggedItem || draggedItem.id === targetTask.id) return;
+                const newTasks = [...tasks]; const oldIdx = newTasks.findIndex(t => t.id === draggedItem.id);
+                if (draggedItem.category !== targetTask.category) newTasks[oldIdx].category = targetTask.category;
+                newTasks.splice(oldIdx, 1);
+                if (targetTask.id === 'DROP_ZONE') newTasks.push({...draggedItem, category: targetTask.category});
+                else { const newIdx = newTasks.findIndex(t => t.id === targetTask.id); newTasks.splice(newIdx, 0, draggedItem); }
+                setTasks(newTasks);
+            };
+
+            const addSeparator = () => {
+                let cat = newTask.category; if(!categories.find(c => c.id === cat)) cat = categories[0].id;
+                const others = tasks.filter(t => t.category !== cat); const current = tasks.filter(t => t.category === cat);
+                setTasks([...others, ...current, { id: Date.now(), category: cat, name: "分段點", time: 0, desc: "換人", type: 'separator', manpower: 1 }]);
+            };
+            const moveCategory = (index, direction) => {
+                const newCats = [...categories]; const target = index + direction;
+                if (target >= 0 && target < newCats.length) { [newCats[index], newCats[target]] = [newCats[target], newCats[index]]; setCategories(newCats); }
+            };
+            const deleteCategory = (id) => { if(confirm("確定刪除？")) { setCategories(categories.filter(c => c.id !== id)); setTasks(tasks.filter(t => t.category !== id)); }};
+            const handleAddTask = () => {
+                if(!newTask.name || !newTask.time) return;
+                let cat = newTask.category; if(!categories.find(c => c.id === cat)) cat = categories[0].id;
+                setTasks([...tasks, { ...newTask, id: Date.now(), time: Number(newTask.time), category: cat }]);
+                setNewTask({ ...newTask, name: "", time: "", desc: "" });
+            };
+            const handleDeleteTask = (id) => setTasks(tasks.filter(t => t.id !== id));
+            const updateTaskTime = (id, newTime) => { const val = Number(newTime); setTasks(prevTasks => prevTasks.map(t => t.id === id ? { ...t, time: (val >= 0 ? val : 0) } : t)); };
+            const addCategory = () => { const name = prompt("輸入新產線名稱:"); if(name) setCategories([...categories, { id: 'cat_'+Date.now(), label: name, color: 'bg-indigo-50 border-indigo-200' }]); };
+            
             const SavedProjectsModal = () => {
                 const savedProjects = JSON.parse(localStorage.getItem('yz_saved_projects') || '[]');
                 return (
                     <div className="modal-overlay" onClick={() => setShowFileMenu(false)}>
-                        <div className="bg-white p-6 rounded-lg shadow-xl w-[500px] max-h-[80vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
-                            <div className="flex justify-between items-center mb-4">
-                                <h3 className="text-xl font-bold flex items-center gap-2"><FolderOpen className="text-blue-600"/> 專案管理 (存檔紀錄)</h3>
-                                <button onClick={() => setShowFileMenu(false)}><X/></button>
-                            </div>
-                            {savedProjects.length === 0 ? (
-                                <p className="text-center text-slate-500 py-10">目前沒有儲存的專案。</p>
-                            ) : (
-                                <div className="space-y-3">
-                                    {savedProjects.map(p => (
-                                        <div key={p.id} className="border p-3 rounded flex justify-between items-center hover:bg-slate-50">
-                                            <div>
-                                                <div className="font-bold text-slate-800">{p.name}</div>
-                                                <div className="text-xs text-slate-500">{p.timestamp}</div>
-                                            </div>
-                                            <div className="flex gap-2">
-                                                <button onClick={() => loadProject(p)} className="bg-blue-100 text-blue-600 px-3 py-1 rounded text-sm hover:bg-blue-200">讀取</button>
-                                                <button onClick={() => deleteProject(p.id)} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={16}/></button>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
+                        <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-lg max-h-[80vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
+                            <div className="flex justify-between items-center mb-4"><h3 className="text-xl font-bold flex items-center gap-2"><FolderOpen className="text-blue-600"/> 存檔紀錄</h3><button onClick={() => setShowFileMenu(false)}><X/></button></div>
+                            {savedProjects.length === 0 ? (<p className="text-center text-slate-500 py-10">無紀錄</p>) : (
+                                <div className="space-y-3">{savedProjects.map(p => (<div key={p.id} className="border p-3 rounded flex justify-between items-center hover:bg-slate-50"><div><div className="font-bold text-slate-800">{p.name}</div><div className="text-xs text-slate-500">{p.timestamp}</div></div><div className="flex gap-2"><button onClick={() => loadProject(p)} className="bg-blue-100 text-blue-600 px-3 py-1 rounded text-sm">讀取</button><button onClick={() => deleteProject(p.id)} className="text-red-400 p-1"><Trash2 size={16}/></button></div></div>))}</div>
                             )}
                         </div>
                     </div>
@@ -468,160 +457,124 @@
             };
 
             return (
-                <div className="min-h-screen pb-20">
-                    <nav className="bg-slate-900 text-white p-4 shadow-lg sticky top-0 z-50 no-print">
-                        <div className="max-w-[1800px] mx-auto flex justify-between items-center">
-                            <div className="flex items-center space-x-2"><Layout size={24} className="text-blue-400" /><h1 className="text-xl font-bold">智慧裝配山積圖 (專案管理版)</h1></div>
-                            <div className="flex space-x-2">
-                                <button onClick={createNewProject} className="flex items-center space-x-2 bg-slate-700 px-3 py-2 rounded text-sm hover:bg-slate-600"><FilePlus size={16} /> <span>開新檔案</span></button>
-                                <button onClick={() => setShowFileMenu(true)} className="flex items-center space-x-2 bg-slate-700 px-3 py-2 rounded text-sm hover:bg-slate-600"><FolderOpen size={16} /> <span>開啟舊檔</span></button>
-                                <button onClick={saveProject} className="flex items-center space-x-2 bg-blue-600 px-3 py-2 rounded text-sm hover:bg-blue-500"><Save size={16} /> <span>儲存專案</span></button>
-                                <div className="w-[1px] h-8 bg-slate-600 mx-2"></div>
-                                <button onClick={() => setShowSettings(!showSettings)} className="flex items-center space-x-2 bg-slate-700 px-3 py-2 rounded text-sm"><Settings size={16} /> <span>設定</span></button>
-                                <button onClick={exportToXLS} className="flex items-center space-x-2 bg-green-600 px-3 py-2 rounded text-sm border border-green-500"><FileSpreadsheet size={16} /> <span>匯出 Excel</span></button>
+                <div className="min-h-screen">
+                    <nav className="bg-slate-900 text-white p-3 shadow-lg sticky top-0 z-50 no-print">
+                        <div className="flex justify-between items-center">
+                            <div className="flex items-center space-x-2"><Layout size={20} className="text-blue-400" /><h1 className="text-lg font-bold truncate">智慧山積圖</h1></div>
+                            <div className="hidden md:flex space-x-2">
+                                <button onClick={createNewProject} className="flex items-center space-x-2 bg-slate-700 px-3 py-2 rounded text-sm hover:bg-slate-600"><FilePlus size={16} /> <span>新檔</span></button>
+                                <button onClick={() => setShowFileMenu(true)} className="flex items-center space-x-2 bg-slate-700 px-3 py-2 rounded text-sm hover:bg-slate-600"><FolderOpen size={16} /> <span>舊檔</span></button>
+                                <button onClick={saveProject} className="flex items-center space-x-2 bg-blue-600 px-3 py-2 rounded text-sm hover:bg-blue-500"><Save size={16} /> <span>儲存</span></button>
+                                <button onClick={exportToXLS} className="flex items-center space-x-2 bg-green-600 px-3 py-2 rounded text-sm hover:bg-green-500"><FileSpreadsheet size={16} /> <span>匯出 Excel</span></button>
+                                <button onClick={() => setShowSettings(!showSettings)} className="flex items-center space-x-2 bg-slate-700 px-3 py-2 rounded text-sm"><Settings size={16} /></button>
                             </div>
+                            <button className="md:hidden p-2" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}><Menu size={24}/></button>
                         </div>
+                        
+                        {mobileMenuOpen && (
+                            <div className="md:hidden mt-2 grid grid-cols-4 gap-2 text-xs">
+                                <button onClick={createNewProject} className="bg-slate-800 p-2 rounded flex flex-col items-center"><FilePlus size={20} className="mb-1"/>新檔</button>
+                                <button onClick={() => setShowFileMenu(true)} className="bg-slate-800 p-2 rounded flex flex-col items-center"><FolderOpen size={20} className="mb-1"/>舊檔</button>
+                                <button onClick={saveProject} className="bg-blue-700 p-2 rounded flex flex-col items-center"><Save size={20} className="mb-1"/>儲存</button>
+                                <button onClick={exportToXLS} className="bg-green-700 p-2 rounded flex flex-col items-center"><FileSpreadsheet size={20} className="mb-1"/>Excel</button>
+                                <button onClick={() => {setShowSettings(!showSettings); setMobileMenuOpen(false);}} className="bg-slate-800 p-2 rounded flex flex-col items-center"><Settings size={20} className="mb-1"/>設定</button>
+                            </div>
+                        )}
                     </nav>
 
                     {showFileMenu && <SavedProjectsModal />}
 
                     {showSettings && (
-                        <div className="bg-white border-b border-slate-200 p-6 no-print animate-fade-in">
-                            <div className="max-w-[1800px] mx-auto">
-                                <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Settings size={18} /> 產線排版設定</h3>
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-                                    {categories.map((cat, idx) => (
-                                        <div key={cat.id} className={`p-3 rounded border flex flex-col gap-2 ${cat.color} transition-all hover:shadow-md`}>
-                                            <div className="flex justify-between items-center"><span className="text-xs font-mono text-slate-500">Col {idx + 1}</span><div className="flex gap-1"><button onClick={() => moveCategory(idx, -1)} disabled={idx===0} className="p-1 hover:bg-white rounded disabled:opacity-30"><MoveUp size={14} className="-rotate-90"/></button><button onClick={() => moveCategory(idx, 1)} disabled={idx===categories.length-1} className="p-1 hover:bg-white rounded disabled:opacity-30"><MoveDown size={14} className="-rotate-90"/></button><button onClick={() => deleteCategory(cat.id)} className="p-1 hover:bg-red-100 text-red-500 rounded"><X size={14}/></button></div></div>
-                                            <input type="text" value={cat.label} onChange={(e) => { const newCats = [...categories]; newCats[idx].label = e.target.value; setCategories(newCats); }} className="w-full bg-white/50 border border-slate-300 rounded px-2 py-1 text-sm font-bold"/>
-                                        </div>
-                                    ))}
-                                    <button onClick={addCategory} className="border-2 border-dashed border-slate-300 rounded p-3 flex flex-col items-center justify-center text-slate-400 hover:border-blue-400 hover:text-blue-500 transition min-h-[100px]"><Plus size={24} /> <span className="text-sm">新增產線</span></button>
-                                </div>
+                        <div className="bg-white border-b border-slate-200 p-4 no-print animate-fade-in">
+                            <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2 text-sm"><Settings size={16} /> 產線排版設定</h3>
+                            <div className="grid grid-cols-1 gap-2">
+                                {categories.map((cat, idx) => (
+                                    <div key={cat.id} className={`p-2 rounded border flex items-center gap-2 ${cat.color}`}>
+                                        <div className="flex gap-1"><button onClick={() => moveCategory(idx, -1)} disabled={idx===0} className="p-1 bg-white rounded shadow-sm disabled:opacity-30"><MoveUp size={14} className="-rotate-90"/></button><button onClick={() => moveCategory(idx, 1)} disabled={idx===categories.length-1} className="p-1 bg-white rounded shadow-sm disabled:opacity-30"><MoveDown size={14} className="-rotate-90"/></button><button onClick={() => deleteCategory(cat.id)} className="p-1 bg-red-100 text-red-500 rounded"><X size={14}/></button></div>
+                                        <input type="text" value={cat.label} onChange={(e) => { const newCats = [...categories]; newCats[idx].label = e.target.value; setCategories(newCats); }} className="flex-1 bg-transparent text-sm font-bold outline-none"/>
+                                    </div>
+                                ))}
+                                <button onClick={addCategory} className="border-2 border-dashed border-slate-300 rounded p-2 text-slate-400 text-sm">+ 新增產線</button>
                             </div>
                         </div>
                     )}
 
-                    <main className="max-w-[1800px] mx-auto p-6 space-y-6">
-                        {/* 專案資訊 */}
-                        <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 no-print">
-                            <div className="xl:col-span-3 bg-white p-5 rounded-xl shadow border">
-                                <h2 className="font-bold text-slate-700 mb-3">專案資訊</h2>
-                                <div className="space-y-2 text-sm">
-                                    <div className="grid grid-cols-2 gap-2"><div><label className="text-xs text-slate-400">客戶</label><input type="text" value={clientName} onChange={e=>setClientName(e.target.value)} className="w-full border rounded px-2 py-1"/></div><div><label className="text-xs text-slate-400">年度</label><input type="text" value={year} onChange={e=>setYear(e.target.value)} className="w-full border rounded px-2 py-1"/></div></div>
-                                    <div><label className="text-xs text-slate-400">車種</label><input type="text" value={productName} onChange={e=>setProductName(e.target.value)} className="w-full border rounded px-2 py-1"/></div>
-                                    <div className="grid grid-cols-2 gap-2">
-                                        <div><label className="text-slate-400 text-xs">產線代號</label><input type="text" value={lineName} onChange={e=>setLineName(e.target.value)} className="w-full border rounded px-2 py-1 font-bold"/></div>
-                                        <div><label className="text-slate-400 text-xs">寬放率</label><input type="number" step="0.01" value={allowance} onChange={e=>setAllowance(Number(e.target.value))} className="w-full border rounded px-2 py-1"/></div>
-                                    </div>
-                                    <div className="grid grid-cols-2 gap-2">
-                                        <div><label className="text-slate-400 text-xs">流程製訂</label><input type="text" value={processEngineer} onChange={e=>setProcessEngineer(e.target.value)} className="w-full border rounded px-2 py-1"/></div>
-                                        <div><label className="text-slate-400 text-xs">工時製訂</label><input type="text" value={timeStudyEngineer} onChange={e=>setTimeStudyEngineer(e.target.value)} className="w-full border rounded px-2 py-1"/></div>
-                                    </div>
-                                    <div><label className="text-xs text-slate-400">目標節拍 (Takt)</label><input type="number" value={taktTime} onChange={e=>setTaktTime(Number(e.target.value))} className="w-full border rounded px-2 py-1 font-mono text-blue-600 font-bold"/></div>
-                                </div>
-                            </div>
-
-                            {/* 任務輸入 */}
-                            <div className="xl:col-span-6 bg-white p-5 rounded-xl shadow border">
-                                <h2 className="font-bold text-slate-700 mb-4 flex gap-2"><Plus size={18}/> 新增項目</h2>
-                                <div className="grid grid-cols-12 gap-2 items-end">
-                                    <div className="col-span-3"><label className="text-xs text-slate-400">位置</label><select value={newTask.category} onChange={e=>setNewTask({...newTask, category: e.target.value})} className="w-full border p-2 rounded text-sm">{categories.map(c=><option key={c.id} value={c.id}>{c.label}</option>)}</select></div>
-                                    <div className="col-span-4"><label className="text-xs text-slate-400">名稱</label><input type="text" value={newTask.name} onChange={e=>setNewTask({...newTask, name: e.target.value})} className="w-full border p-2 rounded text-sm"/></div>
-                                    <div className="col-span-2"><label className="text-xs text-slate-400">工時(s)</label><input type="number" value={newTask.time} onChange={e=>setNewTask({...newTask, time: e.target.value})} className="w-full border p-2 rounded text-sm"/></div>
-                                    <div className="col-span-3 flex gap-1">
-                                        <button onClick={handleAddTask} className="flex-1 bg-blue-600 text-white p-2 rounded hover:bg-blue-700"><Plus size={20} className="mx-auto"/></button>
-                                        <button onClick={addSeparator} className="flex-1 bg-orange-500 text-white p-2 rounded hover:bg-orange-600" title="插入分段"><Scissors size={20} className="mx-auto"/></button>
-                                    </div>
-                                </div>
-                            </div>
-                            <div className="xl:col-span-3 bg-white p-5 rounded-xl shadow border"><div className="chart-container"><canvas ref={chartRef}></canvas></div></div>
+                    <main className="p-4 space-y-4 max-w-full overflow-hidden">
+                        <div className="bg-white p-4 rounded-xl shadow border grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-sm no-print">
+                            <div className="grid grid-cols-2 gap-2"><div><label className="text-xs text-slate-400">客戶</label><input type="text" value={clientName} onChange={e=>setClientName(e.target.value)} className="w-full border rounded px-2 py-1"/></div><div><label className="text-xs text-slate-400">年度</label><input type="text" value={year} onChange={e=>setYear(e.target.value)} className="w-full border rounded px-2 py-1"/></div></div>
+                            <div><label className="text-xs text-slate-400">車種</label><input type="text" value={productName} onChange={e=>setProductName(e.target.value)} className="w-full border rounded px-2 py-1"/></div>
+                            <div className="grid grid-cols-2 gap-2"><div><label className="text-slate-400 text-xs">寬放率</label><input type="number" step="0.01" value={allowance} onChange={e=>setAllowance(Number(e.target.value))} className="w-full border rounded px-2 py-1"/></div><div><label className="text-xs text-slate-400">目標節拍</label><input type="number" value={taktTime} onChange={e=>setTaktTime(Number(e.target.value))} className="w-full border rounded px-2 py-1 font-bold text-blue-600"/></div></div>
                         </div>
 
-                        {/* 泳道圖區域 */}
-                        <div className="bg-white p-6 rounded-xl shadow border min-h-[600px]">
-                            <div className="flex gap-4 overflow-x-auto pb-4 mb-8">
+                        <div className="bg-white p-4 rounded-xl shadow border">
+                            <h2 className="font-bold text-slate-700 mb-3 text-sm flex gap-2"><Plus size={16}/> 新增項目</h2>
+                            <div className="flex flex-col md:flex-row gap-2">
+                                <div className="flex gap-2 w-full md:w-auto">
+                                    <select value={newTask.category} onChange={e=>setNewTask({...newTask, category: e.target.value})} className="border p-2 rounded text-sm flex-1">{categories.map(c=><option key={c.id} value={c.id}>{c.label}</option>)}</select>
+                                    <select value={newTask.type} onChange={e=>setNewTask({...newTask, type: e.target.value})} className="border p-2 rounded text-sm w-24"><option value="process">○</option><option value="inspection">□</option><option value="decision">◇</option></select>
+                                </div>
+                                <div className="flex gap-2 w-full">
+                                    <input type="text" placeholder="名稱" value={newTask.name} onChange={e=>setNewTask({...newTask, name: e.target.value})} className="border p-2 rounded text-sm flex-[2]"/>
+                                    <input type="number" placeholder="秒" value={newTask.time} onChange={e=>setNewTask({...newTask, time: e.target.value})} className="border p-2 rounded text-sm flex-1"/>
+                                </div>
+                                <div className="flex gap-2 w-full md:w-auto">
+                                    <button onClick={handleAddTask} className="flex-1 bg-blue-600 text-white p-2 rounded text-sm">新增</button>
+                                    <button onClick={addSeparator} className="bg-orange-100 text-orange-600 p-2 rounded border border-orange-200"><Scissors size={18}/></button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="bg-white p-4 rounded-xl shadow border"><div className="chart-container"><canvas ref={chartRef}></canvas></div></div>
+
+                        <div className="bg-white p-4 rounded-xl shadow border overflow-hidden">
+                            <div className="flex gap-4 overflow-x-auto pb-4 lane-scroll">
                                 {categories.map((cat) => {
                                     const laneTasks = tasks.filter(t => t.category === cat.id);
-                                    
-                                    // --- Grouping Logic for Swimlane Display ---
-                                    const segments = [];
-                                    let currentSegment = { tasks: [], time: 0, separator: null };
-
+                                    const segments = []; let currentSegment = { tasks: [], time: 0, separator: null };
                                     laneTasks.forEach(task => {
-                                        if (task.type === 'separator') {
-                                            currentSegment.separator = task;
-                                            segments.push(currentSegment);
-                                            currentSegment = { tasks: [], time: 0, separator: null };
-                                        } else {
-                                            currentSegment.tasks.push(task);
-                                            currentSegment.time += task.time;
-                                        }
+                                        if (task.type === 'separator') { currentSegment.separator = task; segments.push(currentSegment); currentSegment = { tasks: [], time: 0, separator: null }; } 
+                                        else { currentSegment.tasks.push(task); currentSegment.time += task.time; }
                                     });
-                                    if (currentSegment.tasks.length > 0 || segments.length === 0) {
-                                        segments.push(currentSegment);
-                                    }
+                                    if (currentSegment.tasks.length > 0 || segments.length === 0) segments.push(currentSegment);
 
                                     return (
-                                        <div key={cat.id} className={`flex-shrink-0 w-[300px] flex flex-col h-full rounded-lg border-2 ${cat.color} p-2`}>
-                                            <div className="font-bold text-center mb-2">{cat.label}</div>
-                                            <div className="flex-grow space-y-2 overflow-y-auto max-h-[800px]" onDragOver={handleDragOver} onDrop={e=>handleDrop(e,{category:cat.id, id:'DROP_ZONE'})}>
-                                                
+                                        <div key={cat.id} className={`flex-shrink-0 w-[280px] flex flex-col h-[500px] rounded-lg border-2 ${cat.color} p-2`}>
+                                            <div className="font-bold text-center mb-2 text-sm truncate">{cat.label}</div>
+                                            <div className="flex-grow space-y-2 overflow-y-auto lane-scroll" onDragOver={handleDragOver} onDrop={e=>handleDrop(e,{category:cat.id, id:'DROP_ZONE'})}>
                                                 {segments.map((seg, segIdx) => (
                                                     <div key={segIdx} className="flex border-b border-slate-200/50 pb-2 mb-2 last:border-0">
-                                                        {/* LEFT SIDE: Time Indicator */}
-                                                        <div className={`w-8 rounded-l flex items-center justify-center border-r mr-2 transition-colors ${seg.time > taktTime ? 'bg-red-100 border-red-200' : 'bg-slate-100 border-slate-200'}`}>
-                                                            <div className={`text-xs font-bold whitespace-nowrap ${seg.time > taktTime ? 'text-red-600' : 'text-slate-500'}`} style={{writingMode: 'vertical-rl', transform: 'rotate(180deg)'}}>
-                                                                {seg.time}s
-                                                            </div>
+                                                        <div className={`w-6 rounded-l flex items-center justify-center border-r mr-2 transition-colors ${seg.time > taktTime ? 'bg-red-100 border-red-200' : 'bg-slate-100 border-slate-200'}`}>
+                                                            <div className={`text-[10px] font-bold whitespace-nowrap ${seg.time > taktTime ? 'text-red-600' : 'text-slate-500'}`} style={{writingMode: 'vertical-rl', transform: 'rotate(180deg)'}}>{seg.time}s</div>
                                                         </div>
-
-                                                        {/* RIGHT SIDE: Tasks */}
                                                         <div className="flex-1 space-y-2">
                                                             {seg.tasks.map(task => (
-                                                                <div key={task.id} draggable onDragStart={e=>handleDragStart(e,task)} onDragEnd={handleDragEnd} onDrop={e=>{e.stopPropagation();handleDrop(e,task)}} className="relative bg-white p-3 rounded shadow-sm border border-slate-200 cursor-grab group hover:border-blue-400">
-                                                                    <div className="flex justify-between"><span className="font-bold text-sm">{task.name}</span><span className="text-xs bg-slate-100 px-1 rounded">{task.time}s</span></div>
-                                                                    <button onClick={() => handleDeleteTask(task.id)} className="absolute right-2 top-2 opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500"><Trash2 size={14}/></button>
+                                                                <div key={task.id} draggable onDragStart={e=>handleDragStart(e,task)} onDragEnd={handleDragEnd} onDrop={e=>{e.stopPropagation();handleDrop(e,task)}} className="relative bg-white p-2 rounded shadow-sm border border-slate-200">
+                                                                    <div className="flex justify-between items-center mb-1"><span className="font-bold text-sm truncate w-24">{task.name}</span><div className="flex items-center gap-1"><input type="number" value={task.time} onChange={(e) => updateTaskTime(task.id, e.target.value)} onMouseDown={(e) => e.stopPropagation()} className="w-10 text-right text-xs border rounded bg-slate-50"/></div></div>
+                                                                    <div className="flex justify-between items-center text-[10px] text-slate-400"><span>{TASK_TYPES[task.type]?.unicode}</span></div>
+                                                                    <button onClick={() => handleDeleteTask(task.id)} className="absolute right-1 top-1 text-slate-300 hover:text-red-500"><X size={12}/></button>
                                                                 </div>
                                                             ))}
-                                                            
-                                                            {/* Separator Node */}
                                                             {seg.separator && (
-                                                                <div draggable onDragStart={e=>handleDragStart(e,seg.separator)} onDragEnd={handleDragEnd} onDrop={e=>{e.stopPropagation();handleDrop(e,seg.separator)}} className="p-1 bg-orange-50 border-2 border-dashed border-orange-300 rounded text-center relative group cursor-grab">
-                                                                    <div className="text-[10px] font-bold text-orange-600 mb-1">▼ 分段</div>
-                                                                    <div className="flex justify-center items-center gap-1 text-[10px] text-slate-600">
-                                                                        人: <input type="number" value={seg.separator.manpower || 1} onChange={(e)=>{const newTasks=[...tasks]; newTasks[tasks.findIndex(t=>t.id===seg.separator.id)].manpower=Number(e.target.value); setTasks(newTasks);}} className="w-8 text-center border rounded bg-white" min="0"/>
-                                                                    </div>
-                                                                    <button onClick={() => handleDeleteTask(seg.separator.id)} className="absolute right-1 top-1 text-slate-400 hover:text-red-500"><Trash2 size={12}/></button>
+                                                                <div draggable onDragStart={e=>handleDragStart(e,seg.separator)} onDragEnd={handleDragEnd} onDrop={e=>{e.stopPropagation();handleDrop(e,seg.separator)}} className="p-1 bg-orange-50 border-2 border-dashed border-orange-300 rounded text-center relative">
+                                                                    <div className="text-[10px] font-bold text-orange-600">▼ 分段 (<input type="number" value={seg.separator.manpower || 1} onChange={(e)=>{const newTasks=[...tasks]; newTasks[tasks.findIndex(t=>t.id===seg.separator.id)].manpower=Number(e.target.value); setTasks(newTasks);}} onMouseDown={e=>e.stopPropagation()} className="w-4 text-center border bg-white" min="0"/>人)</div>
+                                                                    <button onClick={() => handleDeleteTask(seg.separator.id)} className="absolute right-1 top-0.5 text-slate-400 hover:text-red-500"><X size={10}/></button>
                                                                 </div>
                                                             )}
                                                         </div>
                                                     </div>
                                                 ))}
-
-                                                <div className="h-10 border-2 border-dashed border-slate-200 rounded flex items-center justify-center text-slate-300 text-xs">拖曳至此</div>
+                                                <div className="h-8 border-2 border-dashed border-slate-200 rounded flex items-center justify-center text-slate-300 text-xs">拖曳區</div>
                                             </div>
                                         </div>
                                     );
                                 })}
                             </div>
                             
-                            {/* 生產分析表 */}
-                            <div className="border-t pt-4 mt-4">
-                                <h3 className="font-bold mb-2">生產數據分析 (含分段計算)</h3>
-                                <table className="analysis-table">
-                                    <thead><tr><th>總工時</th><th>定員 (含分段)</th><th>瓶頸工時 (線速)</th><th>平衡率</th><th>日產能</th><th>標準工時</th></tr></thead>
-                                    <tbody>
-                                        <tr>
-                                            <td>{stats.totalTime}</td><td className="bg-orange-light font-bold">{stats.manpower}</td><td className={stats.lineSpeed > taktTime ? "text-red-600 font-bold" : "text-green-600 font-bold"}>{stats.lineSpeed}</td><td>{stats.balanceRate}%</td><td>{stats.dailyCapacity}</td><td>{stats.standardTime}</td>
-                                        </tr>
-                                        <tr>
-                                            <td className="font-bold bg-gray-50 text-right">流程製訂：</td>
-                                            <td colSpan="2" className="text-left font-bold">{processEngineer}</td>
-                                            <td className="font-bold bg-gray-50 text-right">工時製訂：</td>
-                                            <td colSpan="2" className="text-left font-bold">{timeStudyEngineer}</td>
-                                        </tr>
-                                    </tbody>
+                            <div className="border-t pt-4 mt-4 overflow-x-auto">
+                                <h3 className="font-bold mb-2 text-sm">數據分析</h3>
+                                <table className="analysis-table min-w-[500px]">
+                                    <thead><tr><th>總工時</th><th>定員</th><th>線速</th><th>平衡率</th><th>日產能</th><th>標準工時(min)</th></tr></thead>
+                                    <tbody><tr><td>{stats.totalTime}</td><td className="bg-orange-light">{stats.manpower}</td><td className={stats.lineSpeed > taktTime ? "text-red-600" : "text-green-600"}>{stats.lineSpeed}</td><td>{stats.balanceRate}%</td><td>{stats.dailyCapacity}</td><td>{stats.standardTime}</td></tr></tbody>
                                 </table>
                             </div>
                         </div>
