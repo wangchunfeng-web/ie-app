@@ -1,154 +1,131 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
-<title>智慧山積圖 Yamazumi Pro</title>
-
-<!-- PWA -->
-<link rel="manifest" href="data:application/json,{&quot;name&quot;:&quot;Yamazumi Pro&quot;,&quot;short_name&quot;:&quot;Yamazumi&quot;,&quot;display&quot;:&quot;standalone&quot;,&quot;background_color&quot;:&quot;#0f172a&quot;,&quot;theme_color&quot;:&quot;#0f172a&quot;}" />
-<meta name="theme-color" content="#0f172a" />
-<meta name="apple-mobile-web-app-capable" content="yes" />
-
-<script src="https://cdn.tailwindcss.com"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>工廠製程管理系統</title>
 <style>
-body { -webkit-tap-highlight-color: transparent; }
+  body { font-family: Arial, sans-serif; margin:0; padding:0; background:#f4f4f4; }
+  header { background:#007bff; color:white; padding:10px; text-align:center; }
+  h1 { margin:0; font-size:1.2em; }
+  #controls { display:flex; flex-wrap:wrap; padding:10px; gap:10px; background:#fff; }
+  #controls select, #controls input { padding:5px; }
+  #process-container { display:flex; flex-wrap:wrap; gap:10px; padding:10px; }
+  .process-line { background:#fff; padding:10px; border-radius:8px; flex:1; min-width:250px; }
+  .process-line h2 { font-size:1em; margin-top:0; }
+  .task { padding:8px; margin:5px 0; background:#eee; border-radius:5px; cursor:grab; display:flex; justify-content:space-between; align-items:center; }
+  .task.dragging { opacity:0.5; }
+  .chart { width:100%; height:150px; margin-top:10px; }
+  button { padding:5px 10px; cursor:pointer; border:none; border-radius:5px; background:#007bff; color:white; }
 </style>
 </head>
-<body class="bg-slate-100 text-slate-800">
-
-<header class="bg-slate-900 text-white p-4 font-bold text-lg">
-  智慧山積圖 Yamazumi Pro
+<body>
+<header>
+  <h1>工廠製程管理系統</h1>
 </header>
 
-<main class="p-4 space-y-4">
-
-<!-- 基本設定 -->
-<div class="bg-white p-4 rounded shadow">
-  <div class="grid grid-cols-2 gap-3">
-    <div>
-      <label class="text-sm">目標節拍 (秒)</label>
-      <input id="takt" type="number" class="w-full border p-2 rounded" />
-    </div>
-    <div>
-      <label class="text-sm">人數</label>
-      <input id="workers" type="number" class="w-full border p-2 rounded" />
-    </div>
-  </div>
+<div id="controls">
+  <button onclick="exportExcel()">📄 匯出 Excel</button>
+  <button onclick="addLine()">➕ 新增製程段</button>
 </div>
 
-<!-- 新增工序 -->
-<div class="bg-white p-4 rounded shadow space-y-2">
-  <h2 class="font-bold">新增工序</h2>
-  <input id="taskName" placeholder="工序名稱" class="w-full border p-2 rounded" />
-  <input id="taskTime" type="number" placeholder="工時(秒)" class="w-full border p-2 rounded" />
-  <select id="taskLine" class="w-full border p-2 rounded">
-    <option value="A">線別 A</option>
-    <option value="B">線別 B</option>
-  </select>
-  <button onclick="addTask()" class="w-full bg-blue-600 text-white p-2 rounded">新增</button>
-</div>
+<div id="process-container"></div>
 
-<!-- 圖表 -->
-<div class="bg-white p-4 rounded shadow">
-  <canvas id="chart" height="260"></canvas>
-</div>
-
-<!-- 操作 -->
-<div class="grid grid-cols-2 gap-2">
-  <button onclick="exportExcel()" class="bg-emerald-600 text-white p-2 rounded">匯出 Excel</button>
-  <button onclick="resetAll()" class="bg-red-600 text-white p-2 rounded">清空資料</button>
-</div>
-
-</main>
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<!-- SheetJS -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 
 <script>
-/* === State === */
-const KEY = 'yamazumi_pro';
-let state = JSON.parse(localStorage.getItem(KEY)) || {
-  takt: 180,
-  workers: 2,
-  tasks: []
-};
-
-/* === Init === */
-takt.value = state.takt;
-workers.value = state.workers;
-
-[takt, workers].forEach(el => el.onchange = save);
-
-function save() {
-  state.takt = Number(takt.value);
-  state.workers = Number(workers.value);
-  localStorage.setItem(KEY, JSON.stringify(state));
-  render();
+let lines = [];
+function addLine(name) {
+  const lineName = name || `製程段 ${lines.length+1}`;
+  const line = { name: lineName, tasks: [] };
+  lines.push(line);
+  renderLines();
 }
 
-function addTask() {
-  if (!taskName.value || !taskTime.value) return;
-  state.tasks.push({
-    id: Date.now(),
-    name: taskName.value,
-    time: Number(taskTime.value),
-    line: taskLine.value
+function addTask(lineIndex, taskName) {
+  const person = prompt("指派人員：");
+  const standardTime = parseFloat(prompt("標準工時：")) || 1;
+  const actualTime = parseFloat(prompt("實績工時：")) || standardTime;
+  lines[lineIndex].tasks.push({name: taskName, person, standardTime, actualTime});
+  renderLines();
+}
+
+function renderLines() {
+  const container = document.getElementById("process-container");
+  container.innerHTML = "";
+  lines.forEach((line, idx) => {
+    const div = document.createElement("div");
+    div.className = "process-line";
+    div.innerHTML = `<h2>${line.name} <button onclick="addTask(${idx}, '工序 ${line.tasks.length+1}')">➕ 工序</button></h2>`;
+    line.tasks.forEach((task, tIdx) => {
+      const taskDiv = document.createElement("div");
+      taskDiv.className = "task";
+      taskDiv.draggable = true;
+      taskDiv.innerHTML = `<span>${task.name} (${task.person})</span><span>${task.actualTime}/${task.standardTime}h</span>`;
+      taskDiv.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', idx+","+tIdx); taskDiv.classList.add('dragging'); });
+      taskDiv.addEventListener('dragend', e => { taskDiv.classList.remove('dragging'); });
+      taskDiv.addEventListener('dragover', e => e.preventDefault());
+      taskDiv.addEventListener('drop', e => {
+        e.preventDefault();
+        const data = e.dataTransfer.getData('text/plain').split(',');
+        const fromLine = parseInt(data[0]), fromTask = parseInt(data[1]);
+        const temp = lines[fromLine].tasks[fromTask];
+        lines[fromLine].tasks.splice(fromTask,1);
+        lines[idx].tasks.splice(tIdx,0,temp);
+        renderLines();
+      });
+      div.appendChild(taskDiv);
+    });
+    // 繪製山積圖
+    const canvas = document.createElement("canvas");
+    canvas.className = "chart";
+    div.appendChild(canvas);
+    renderChart(canvas, line.tasks);
+    container.appendChild(div);
   });
-  taskName.value = taskTime.value = '';
-  save();
 }
 
-function resetAll() {
-  if (!confirm('確定清空？')) return;
-  localStorage.removeItem(KEY);
-  location.reload();
-}
-
-/* === Yamazumi Algorithm === */
-function calculateStacks() {
-  const stacks = Array.from({ length: state.workers }, () => 0);
-  state.tasks.forEach(t => {
-    let i = stacks.indexOf(Math.min(...stacks));
-    stacks[i] += t.time;
-  });
-  return stacks;
-}
-
-/* === Chart === */
-let chart;
-function render() {
-  const stacks = calculateStacks();
-  if (chart) chart.destroy();
-  chart = new Chart(document.getElementById('chart'), {
-    type: 'bar',
-    data: {
-      labels: stacks.map((_, i) => `人員 ${i+1}`),
-      datasets: [{
-        label: '累計工時',
-        data: stacks,
-        backgroundColor: stacks.map(v => v > state.takt ? '#ef4444' : '#3b82f6')
-      }]
+function renderChart(canvas, tasks) {
+  const ctx = canvas.getContext('2d');
+  const labels = tasks.map(t=>t.name);
+  const standardData = tasks.map(t=>t.standardTime);
+  const actualData = tasks.map(t=>t.actualTime);
+  new Chart(ctx, {
+    type:'bar',
+    data:{
+      labels,
+      datasets:[
+        {label:'標準工時', data:standardData, backgroundColor:'#007bff'},
+        {label:'實績工時', data:actualData, backgroundColor:'#ff5733'}
+      ]
     },
-    options: { scales: { y: { beginAtZero: true } } }
+    options:{ responsive:true, maintainAspectRatio:false }
   });
 }
 
-/* === Excel === */
 function exportExcel() {
-  const ws = XLSX.utils.json_to_sheet(state.tasks);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Tasks');
-  XLSX.writeFile(wb, 'yamazumi.xlsx');
+  let wb = XLSX.utils.book_new();
+  lines.forEach(line => {
+    const ws_data = [['工序','人員','標準工時','實績工時']];
+    line.tasks.forEach(t => ws_data.push([t.name, t.person, t.standardTime, t.actualTime]));
+    const ws = XLSX.utils.aoa_to_sheet(ws_data);
+    XLSX.utils.book_append_sheet(wb, ws, line.name);
+  });
+  XLSX.writeFile(wb, "工廠製程.xlsx");
 }
 
-render();
+// 初始化
+addLine("前段");
+addLine("後段");
+</script>
 
-/* === PWA Offline === */
+<!-- PWA Service Worker -->
+<script>
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register(URL.createObjectURL(new Blob([
-    `self.addEventListener('fetch',e=>e.respondWith(caches.open('v1').then(c=>c.match(e.request).then(r=>r||fetch(e.request).then(res=>{c.put(e.request,res.clone());return res;})))))`
-  ], { type: 'text/javascript' })));
+  navigator.serviceWorker.register('sw.js').catch(console.error);
 }
 </script>
 </body>
