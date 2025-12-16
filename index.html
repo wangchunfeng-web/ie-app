@@ -1,6 +1,43 @@
 <!DOCTYPE html>
-<html>
-<body>
-  <h1>GitHub Pages OK</h1>
-</body>
-</html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>智慧山積圖</title>
+
+<!-- PWA -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0f172a">
+
+<link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/2921/2921226.png">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body { -webkit-tap-highlight-color: transparent; }
+.chart-box { height: 260px; }
+</style>
+</head>
+
+<body class="bg-slate-100 text-slate-800 pb-24">
+
+<nav class="bg-slate-900 text-white p-3 sticky top-0 z-50">
+  <div class="flex justify-between items-center">
+    <div class="font-bold">智慧山積圖</div>
+    <button onclick="resetData()" class="text-sm bg-red-500 px-3 py-1 rounded">清空</button>
+  </div>
+</nav>
+
+<main class="p-4 space-y-4">
+
+<!-- 基本設定 -->
+<div class="bg-white p-4 rounded shadow space-y-2">
+  <div class="grid grid-cols-2 gap-2 text-sm">
+    <div>
+      <label>目標節拍(s)</label>
+      <input id="takt" type="number" class="w-full border p-1 rounded" />
+    </div>
+    <div>
+      <label>寬放率</lab
