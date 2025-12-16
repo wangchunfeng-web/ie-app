@@ -2,169 +2,154 @@
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<title>智慧山積圖</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+<title>智慧山積圖 Yamazumi Pro</title>
 
 <!-- PWA -->
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="theme-color" content="#0f172a">
-
-<link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/2921/2921226.png">
+<link rel="manifest" href="data:application/json,{&quot;name&quot;:&quot;Yamazumi Pro&quot;,&quot;short_name&quot;:&quot;Yamazumi&quot;,&quot;display&quot;:&quot;standalone&quot;,&quot;background_color&quot;:&quot;#0f172a&quot;,&quot;theme_color&quot;:&quot;#0f172a&quot;}" />
+<meta name="theme-color" content="#0f172a" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
 
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
 <style>
 body { -webkit-tap-highlight-color: transparent; }
-.chart-box { height: 260px; }
 </style>
 </head>
+<body class="bg-slate-100 text-slate-800">
 
-<body class="bg-slate-100 text-slate-800 pb-24">
-
-<nav class="bg-slate-900 text-white p-3 sticky top-0 z-50">
-  <div class="flex justify-between items-center">
-    <div class="font-bold">智慧山積圖</div>
-    <button onclick="resetData()" class="text-sm bg-red-500 px-3 py-1 rounded">清空</button>
-  </div>
-</nav>
+<header class="bg-slate-900 text-white p-4 font-bold text-lg">
+  智慧山積圖 Yamazumi Pro
+</header>
 
 <main class="p-4 space-y-4">
 
 <!-- 基本設定 -->
-<div class="bg-white p-4 rounded shadow space-y-2">
-  <div class="grid grid-cols-2 gap-2 text-sm">
+<div class="bg-white p-4 rounded shadow">
+  <div class="grid grid-cols-2 gap-3">
     <div>
-      <label>目標節拍(s)</label>
-      <input id="takt" type="number" class="w-full border p-1 rounded" />
+      <label class="text-sm">目標節拍 (秒)</label>
+      <input id="takt" type="number" class="w-full border p-2 rounded" />
     </div>
     <div>
-      <label>寬放率</label>
-      <input id="allowance" type="number" step="0.01" class="w-full border p-1 rounded" />
+      <label class="text-sm">人數</label>
+      <input id="workers" type="number" class="w-full border p-2 rounded" />
     </div>
   </div>
 </div>
 
 <!-- 新增工序 -->
 <div class="bg-white p-4 rounded shadow space-y-2">
-  <h2 class="font-bold text-sm">新增工序</h2>
-  <input id="taskName" placeholder="名稱" class="w-full border p-2 rounded text-sm">
-  <input id="taskTime" type="number" placeholder="秒數" class="w-full border p-2 rounded text-sm">
+  <h2 class="font-bold">新增工序</h2>
+  <input id="taskName" placeholder="工序名稱" class="w-full border p-2 rounded" />
+  <input id="taskTime" type="number" placeholder="工時(秒)" class="w-full border p-2 rounded" />
+  <select id="taskLine" class="w-full border p-2 rounded">
+    <option value="A">線別 A</option>
+    <option value="B">線別 B</option>
+  </select>
   <button onclick="addTask()" class="w-full bg-blue-600 text-white p-2 rounded">新增</button>
 </div>
 
-<!-- Chart -->
+<!-- 圖表 -->
 <div class="bg-white p-4 rounded shadow">
-  <div class="chart-box">
-    <canvas id="chart"></canvas>
-  </div>
+  <canvas id="chart" height="260"></canvas>
 </div>
 
-<!-- 任務列表 -->
-<div class="bg-white p-4 rounded shadow">
-  <h2 class="font-bold text-sm mb-2">工序列表</h2>
-  <div id="taskList" class="space-y-2"></div>
+<!-- 操作 -->
+<div class="grid grid-cols-2 gap-2">
+  <button onclick="exportExcel()" class="bg-emerald-600 text-white p-2 rounded">匯出 Excel</button>
+  <button onclick="resetAll()" class="bg-red-600 text-white p-2 rounded">清空資料</button>
 </div>
 
 </main>
 
 <script>
-const storeKey = 'yamazumi_v1';
-
-let state = JSON.parse(localStorage.getItem(storeKey)) || {
+/* === State === */
+const KEY = 'yamazumi_pro';
+let state = JSON.parse(localStorage.getItem(KEY)) || {
   takt: 180,
-  allowance: 1.05,
+  workers: 2,
   tasks: []
 };
 
-const taktInput = document.getElementById('takt');
-const allowanceInput = document.getElementById('allowance');
-const list = document.getElementById('taskList');
+/* === Init === */
+takt.value = state.takt;
+workers.value = state.workers;
 
-taktInput.value = state.takt;
-allowanceInput.value = state.allowance;
-
-taktInput.onchange = () => {
-  state.takt = Number(taktInput.value);
-  save();
-};
-allowanceInput.onchange = () => {
-  state.allowance = Number(allowanceInput.value);
-  save();
-};
+[takt, workers].forEach(el => el.onchange = save);
 
 function save() {
-  localStorage.setItem(storeKey, JSON.stringify(state));
+  state.takt = Number(takt.value);
+  state.workers = Number(workers.value);
+  localStorage.setItem(KEY, JSON.stringify(state));
   render();
 }
 
 function addTask() {
-  const name = taskName.value.trim();
-  const time = Number(taskTime.value);
-  if (!name || !time) return;
-
-  state.tasks.push({ id: Date.now(), name, time });
-  taskName.value = '';
-  taskTime.value = '';
+  if (!taskName.value || !taskTime.value) return;
+  state.tasks.push({
+    id: Date.now(),
+    name: taskName.value,
+    time: Number(taskTime.value),
+    line: taskLine.value
+  });
+  taskName.value = taskTime.value = '';
   save();
 }
 
-function deleteTask(id) {
-  state.tasks = state.tasks.filter(t => t.id !== id);
-  save();
-}
-
-function resetData() {
+function resetAll() {
   if (!confirm('確定清空？')) return;
-  localStorage.removeItem(storeKey);
+  localStorage.removeItem(KEY);
   location.reload();
 }
 
-let chart;
-function renderChart() {
-  const labels = state.tasks.map(t => t.name);
-  const data = state.tasks.map(t => t.time);
-  if (chart) chart.destroy();
+/* === Yamazumi Algorithm === */
+function calculateStacks() {
+  const stacks = Array.from({ length: state.workers }, () => 0);
+  state.tasks.forEach(t => {
+    let i = stacks.indexOf(Math.min(...stacks));
+    stacks[i] += t.time;
+  });
+  return stacks;
+}
 
+/* === Chart === */
+let chart;
+function render() {
+  const stacks = calculateStacks();
+  if (chart) chart.destroy();
   chart = new Chart(document.getElementById('chart'), {
     type: 'bar',
     data: {
-      labels,
+      labels: stacks.map((_, i) => `人員 ${i+1}`),
       datasets: [{
-        label: '工時(s)',
-        data,
-        backgroundColor: data.map(v => v > state.takt ? '#ef4444' : '#3b82f6')
+        label: '累計工時',
+        data: stacks,
+        backgroundColor: stacks.map(v => v > state.takt ? '#ef4444' : '#3b82f6')
       }]
     },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      scales: { y: { beginAtZero: true } }
-    }
+    options: { scales: { y: { beginAtZero: true } } }
   });
 }
 
-function renderList() {
-  list.innerHTML = '';
-  state.tasks.forEach(t => {
-    const div = document.createElement('div');
-    div.className = 'flex justify-between items-center border p-2 rounded text-sm';
-    div.innerHTML = `
-      <div>${t.name} (${t.time}s)</div>
-      <button class="text-red-500" onclick="deleteTask(${t.id})">刪</button>
-    `;
-    list.appendChild(div);
-  });
-}
-
-function render() {
-  renderList();
-  renderChart();
+/* === Excel === */
+function exportExcel() {
+  const ws = XLSX.utils.json_to_sheet(state.tasks);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Tasks');
+  XLSX.writeFile(wb, 'yamazumi.xlsx');
 }
 
 render();
-</script>
 
+/* === PWA Offline === */
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register(URL.createObjectURL(new Blob([
+    `self.addEventListener('fetch',e=>e.respondWith(caches.open('v1').then(c=>c.match(e.request).then(r=>r||fetch(e.request).then(res=>{c.put(e.request,res.clone());return res;})))))`
+  ], { type: 'text/javascript' })));
+}
+</script>
 </body>
 </html>
