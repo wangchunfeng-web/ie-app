@@ -261,10 +261,10 @@
             const handleDeleteTask = (id) => setTasks(tasks.filter(t => t.id !== id));
             const addCategory = () => { const name = prompt("輸入新產線名稱:"); if(name) setCategories([...categories, { id: 'cat_'+Date.now(), label: name, color: 'bg-indigo-50 border-indigo-200' }]); };
 
-            // ✅ 完全修復的 Export 邏輯 - 使用簡化的 HTML-Excel 格式（所有裝置相容）
+            // ✅ 完全修復的 Export 邏輯
             const exportToXLS = () => {
                 try {
-                    const dateStr = new Date().toLocaleDateString('zh-TW');
+                    const dateStr = new Date().toLocaleDateString();
 
                     // Step 1: 為每個 category 準備分段資訊
                     const categorySegments = {};
@@ -293,45 +293,43 @@
                         categorySegments[cat.id] = segments;
                     });
 
-                    // Step 2: 建立 HTML 表格 (簡化版本 - 更相容)
-                    const colsPerCat = 5; // 時間 | 符號 | 工時 | 名稱 | 備註
+                    // Step 2: 建立 HTML 表格
+                    const colsPerCat = 5; 
                     const totalCols = categories.length * colsPerCat;
 
                     let html = [];
+                    // 使用標準 HTML 結構，不依賴複雜的 XML namespace
                     html.push('<!DOCTYPE html>');
-                    html.push('<html>');
-                    html.push('<head>');
-                    html.push('<meta charset="UTF-8" />');
+                    html.push('<html><head><meta charset="UTF-8">');
                     html.push('<style>');
                     html.push('body { font-family: "Microsoft YaHei", Arial, sans-serif; }');
                     html.push('table { border-collapse: collapse; width: 100%; }');
-                    html.push('td, th { border: 1px solid #000; padding: 6px; text-align: center; }');
-                    html.push('td { height: 20px; }');
-                    html.push('</style>');
-                    html.push('</head>');
-                    html.push('<body>');
+                    html.push('td, th { border: 1px solid #000; padding: 4px; vertical-align: middle; }');
+                    html.push('.bg-header { background-color: #f3f4f6; font-weight: bold; }');
+                    html.push('</style></head><body>');
                     html.push('<table>');
 
                     // 標題行
-                    html.push(`<tr><td colspan="${totalCols}" style="background-color: #1e3a8a; color: white; font-size: 14pt; font-weight: bold; padding: 10px; height: auto;">MY27 / G9 ${productName} 裝配操作程序圖</td></tr>`);
+                    html.push(`<tr><td colspan="${totalCols}" style="background-color: #1e3a8a; color: white; text-align: center; font-size: 14pt; font-weight: bold; padding: 10px;">MY27 / G9 ${productName} 裝配操作程序圖</td></tr>`);
 
                     // 元資訊行
-                    html.push('<tr>');
+                    html.push(`<tr>`);
                     for (let i = 0; i < categories.length; i++) {
-                        if (i === 0) html.push(`<td colspan="${colsPerCat}" style="background-color: #e0e7ff; font-weight: bold; text-align: left;">客戶: ${clientName}</td>`);
-                        else if (i === 1) html.push(`<td colspan="${colsPerCat}" style="background-color: #e0e7ff; font-weight: bold; text-align: left;">年度: ${year}</td>`);
-                        else if (i === 2) html.push(`<td colspan="${colsPerCat}" style="background-color: #e0e7ff; font-weight: bold; text-align: left;">生產線: ${lineName}</td>`);
-                        else if (i === 3) html.push(`<td colspan="${colsPerCat}" style="background-color: #e0e7ff; font-weight: bold; text-align: left;">日期: ${dateStr}</td>`);
-                        else html.push(`<td colspan="${colsPerCat}" style="background-color: #e0e7ff;"></td>`);
+                        let content = "";
+                        if (i === 0) content = `客戶: ${clientName}`;
+                        else if (i === 1) content = `年度: ${year}`;
+                        else if (i === 2) content = `生產線別: ${lineName}`;
+                        else if (i === 3) content = `制定日期: ${dateStr}`;
+                        html.push(`<td colspan="${colsPerCat}" class="bg-header">${content}</td>`);
                     }
-                    html.push('</tr>');
+                    html.push(`</tr>`);
 
                     // 產線標題行
-                    html.push('<tr>');
+                    html.push(`<tr>`);
                     categories.forEach(cat => {
-                        html.push(`<td colspan="${colsPerCat}" style="background-color: #bfdbfe; font-weight: bold;">${cat.label}</td>`);
+                        html.push(`<td colspan="${colsPerCat}" style="background-color: #dbeafe; text-align: center; font-weight: bold;">${cat.label}</td>`);
                     });
-                    html.push('</tr>');
+                    html.push(`</tr>`);
 
                     // 計算最大行數
                     const maxRowsPerCat = Math.max(...categories.map(cat => {
@@ -344,8 +342,7 @@
 
                     // 逐行輸出
                     for (let rowIdx = 0; rowIdx < maxRowsPerCat; rowIdx++) {
-                        html.push('<tr>');
-                        
+                        html.push(`<tr>`);
                         categories.forEach(cat => {
                             let rowCounter = 0;
                             let isFound = false;
@@ -353,7 +350,7 @@
                             for (let seg of categorySegments[cat.id]) {
                                 if (seg.isSeparator) {
                                     if (rowCounter === rowIdx) {
-                                        html.push(`<td colspan="${colsPerCat}" style="background-color: #fef3c7; font-weight: bold;">分段 (${seg.manpower}人)</td>`);
+                                        html.push(`<td colspan="${colsPerCat}" style="background-color: #fef3c7; text-align: center; font-weight: bold;">▼ 分段 (${seg.manpower}人)</td>`);
                                         isFound = true;
                                         break;
                                     }
@@ -362,15 +359,15 @@
                                     for (let taskIdx = 0; taskIdx < seg.tasks.length; taskIdx++) {
                                         if (rowCounter === rowIdx) {
                                             const task = seg.tasks[taskIdx];
-                                            const symbol = TASK_TYPES[task.type]?.unicode || 'O';
+                                            const symbol = TASK_TYPES[task.type]?.unicode || '○';
                                             const timeStr = taskIdx === 0 ? seg.totalTime + 's' : '';
-                                            const timeBgColor = seg.totalTime > taktTime ? '#ffcccc' : '#f3f4f6';
+                                            const timeBgStyle = seg.totalTime > taktTime ? 'background-color: #ffedd5; color: #dc2626; font-weight: bold;' : 'background-color: #f3f4f6;';
                                             
-                                            html.push(`<td style="background-color: ${timeBgColor}; font-weight: ${seg.totalTime > taktTime ? 'bold' : 'normal'};">${timeStr}</td>`);
-                                            html.push(`<td>${symbol}</td>`);
-                                            html.push(`<td>${task.time}s</td>`);
+                                            html.push(`<td style="${timeBgStyle} text-align: center;">${timeStr}</td>`);
+                                            html.push(`<td style="text-align: center;">${symbol}</td>`);
+                                            html.push(`<td style="text-align: center;">${task.time}</td>`);
                                             html.push(`<td style="text-align: left;">${task.name}</td>`);
-                                            html.push(`<td>${task.desc || ''}</td>`);
+                                            html.push(`<td style="text-align: center;">${task.desc || ''}</td>`);
                                             
                                             isFound = true;
                                             break;
@@ -385,60 +382,63 @@
                                 html.push(`<td></td><td></td><td></td><td></td><td></td>`);
                             }
                         });
-                        
-                        html.push('</tr>');
+                        html.push(`</tr>`);
                     }
 
-                    // 分析表標題
-                    html.push(`<tr><td colspan="${totalCols}" style="background-color: #f3f4f6; font-weight: bold; padding: 10px; height: auto; border-top: 3px solid #000;">生產數據分析表</td></tr>`);
+                    // 空行
+                    html.push(`<tr><td colspan="${totalCols}" style="height: 10px; border: none;"></td></tr>`);
 
-                    // 分析表標頭
-                    html.push('<tr style="background-color: #f3f4f6;">');
+                    // 分析表
                     const colsAnalysis = Math.floor(totalCols / 6);
-                    const remCols = totalCols - (colsAnalysis * 5);
-                    html.push(`<td colspan="${colsAnalysis}" style="font-weight: bold;">總工時</td>`);
-                    html.push(`<td colspan="${colsAnalysis}" style="font-weight: bold;">定員</td>`);
-                    html.push(`<td colspan="${colsAnalysis}" style="font-weight: bold;">線速</td>`);
-                    html.push(`<td colspan="${colsAnalysis}" style="font-weight: bold;">平衡率</td>`);
-                    html.push(`<td colspan="${colsAnalysis}" style="font-weight: bold;">日產能</td>`);
-                    html.push(`<td colspan="${remCols}" style="font-weight: bold;">標準工時</td>`);
-                    html.push('</tr>');
-
-                    // 分析表數據
-                    html.push('<tr>');
-                    html.push(`<td colspan="${colsAnalysis}" style="background-color: #ffedd5;">${stats.totalTime}</td>`);
-                    html.push(`<td colspan="${colsAnalysis}" style="background-color: #ffedd5;">${stats.manpower}</td>`);
-                    html.push(`<td colspan="${colsAnalysis}" style="background-color: #ffedd5;">${stats.lineSpeed}</td>`);
-                    html.push(`<td colspan="${colsAnalysis}" style="background-color: #ffedd5;">${stats.balanceRate}%</td>`);
-                    html.push(`<td colspan="${colsAnalysis}" style="background-color: #ffedd5;">${stats.dailyCapacity}</td>`);
-                    html.push(`<td colspan="${remCols}" style="background-color: #ffedd5;">${stats.standardTime}</td>`);
-                    html.push('</tr>');
-
-                    // 簽章行
-                    html.push('<tr>');
-                    html.push(`<td colspan="1" style="font-weight: bold; text-align: right;">流程製訂:</td>`);
-                    html.push(`<td colspan="${Math.ceil((totalCols - 2) / 2)}" style="text-align: left;">${processEngineer}</td>`);
-                    html.push(`<td colspan="1" style="font-weight: bold; text-align: right;">工時製訂:</td>`);
-                    html.push(`<td colspan="${totalCols - 3 - Math.ceil((totalCols - 2) / 2)}" style="text-align: left;">${timeStudyEngineer}</td>`);
-                    html.push('</tr>');
-
-                    html.push('</table>');
-                    html.push('</body>');
-                    html.push('</html>');
-
-                    // Step 3: 建立 Blob 並下載
-                    const finalHTML = html.join('\n');
-                    const bom = new Uint8Array([0xEF, 0xBB, 0xBF]); // UTF-8 BOM
-                    const blob = new Blob([bom, finalHTML], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=utf-8;' });
+                    const remainder = totalCols - (colsAnalysis * 6); // 餘數分配給最後一欄
                     
+                    html.push(`<tr><td colspan="${totalCols}" class="bg-header" style="text-align: center;">生產數據分析表</td></tr>`);
+                    html.push(`<tr class="bg-header">`);
+                    html.push(`<td colspan="${colsAnalysis}" style="text-align: center;">總工時</td>`);
+                    html.push(`<td colspan="${colsAnalysis}" style="text-align: center;">定員</td>`);
+                    html.push(`<td colspan="${colsAnalysis}" style="text-align: center;">線速</td>`);
+                    html.push(`<td colspan="${colsAnalysis}" style="text-align: center;">平衡率</td>`);
+                    html.push(`<td colspan="${colsAnalysis}" style="text-align: center;">日產能</td>`);
+                    html.push(`<td colspan="${colsAnalysis + remainder}" style="text-align: center;">標準工時</td>`);
+                    html.push(`</tr>`);
+
+                    html.push(`<tr>`);
+                    html.push(`<td colspan="${colsAnalysis}" style="background-color: #ffedd5; text-align: center;">${stats.totalTime}</td>`);
+                    html.push(`<td colspan="${colsAnalysis}" style="background-color: #ffedd5; text-align: center;">${stats.manpower}</td>`);
+                    html.push(`<td colspan="${colsAnalysis}" style="background-color: #ffedd5; text-align: center;">${stats.lineSpeed}</td>`);
+                    html.push(`<td colspan="${colsAnalysis}" style="background-color: #ffedd5; text-align: center;">${stats.balanceRate}%</td>`);
+                    html.push(`<td colspan="${colsAnalysis}" style="background-color: #ffedd5; text-align: center;">${stats.dailyCapacity}</td>`);
+                    html.push(`<td colspan="${colsAnalysis + remainder}" style="background-color: #ffedd5; text-align: center;">${stats.standardTime}</td>`);
+                    html.push(`</tr>`);
+
+                    // 簽章行 (修正計算錯誤)
+                    html.push(`<tr><td colspan="${totalCols}" style="height: 10px; border: none;"></td></tr>`);
+                    
+                    const signCol1 = 1; // 標題
+                    const signCol2 = Math.floor((totalCols - 2) / 2); // 內容
+                    const signCol3 = 1; // 標題
+                    const signCol4 = totalCols - signCol1 - signCol2 - signCol3; // 剩餘全給最後一欄
+
+                    html.push(`<tr>`);
+                    html.push(`<td colspan="${signCol1}" class="bg-header">流程製訂：</td>`);
+                    html.push(`<td colspan="${signCol2}">${processEngineer}</td>`);
+                    html.push(`<td colspan="${signCol3}" class="bg-header">工時製訂：</td>`);
+                    html.push(`<td colspan="${signCol4}">${timeStudyEngineer}</td>`);
+                    html.push(`</tr>`);
+
+                    html.push('</table></body></html>');
+
+                    // Step 3: 下載 (加入 BOM \uFEFF 解決亂碼)
+                    const finalHTML = html.join('\n');
+                    const blob = new Blob(['\uFEFF', finalHTML], { type: 'application/vnd.ms-excel;charset=utf-8' });
                     const link = document.createElement('a');
                     link.href = URL.createObjectURL(blob);
-                    link.download = `${productName.replace(/\//g, '_')}_${dateStr.replace(/\//g, '-')}.xlsx`;
+                    link.download = `${productName.replace(/[\/\\:*?"<>|]/g, '-')}_${dateStr}.xls`;
                     document.body.appendChild(link);
                     link.click();
                     document.body.removeChild(link);
                     URL.revokeObjectURL(link.href);
-                    
+
                 } catch(err) {
                     console.error('Excel export error:', err);
                     alert('匯出失敗：' + err.message);
